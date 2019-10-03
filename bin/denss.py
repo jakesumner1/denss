@@ -93,8 +93,8 @@ if __name__ == "__main__":
     my_logger.info('Output prefix: %s', args.output)
     my_logger.info('Mode: %s', args.mode)
 
-    qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side = saxs.denss(
-        q=q,I=I,sigq=sigq,
+    qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side = saxs.denss_multiple(
+        scattering_data = np.array([[I, q, sigq], [I[:-5], q[:-5], sigq[:-5]]]),
         dmax=args.dmax,
         ne=args.ne,
         voxel=args.voxel,
