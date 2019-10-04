@@ -47,7 +47,20 @@ except ImportError:
 initparser = argparse.ArgumentParser(description=" DENSS: DENsity from Solution Scattering.\n A tool for calculating an electron density map from solution scattering data", formatter_class=argparse.RawTextHelpFormatter)
 initargs = dopts.parse_arguments(initparser, gnomdmax=None)
 
-q, I, sigq, dmax, isout = saxs.loadProfile(initargs.file, units=initargs.units)
+## handles the issue of having to add multiple files from the -fm command to the scattering data array ~JAS
+## Should work with any number of files - can be .out or .dat, doesn't matter ~JAS
+scattering_data = []
+if initargs.filemultiple == None:
+    q, I, sigq, dmax, isout = saxs.loadProfile(initargs.file, units=initargs.units)
+elif initargs.filemultiple != None:
+    temp_dmax = []
+    for fname in initargs.filemultiple:
+        q, I, sigq, dmax, isout = saxs.loadProfile(fname, units=initargs.units)
+        scattering_data.append([I,q,sigq])
+        temp_dmax.append(dmax)
+## finally, get the largest Dmax from the temp_dmax list ~JAS
+dmax = max(temp_dmax)
+scattering_data = np.array(scattering_data) #turn into numpy array for calculations ~JAS
 
 if not initargs.force_run:
     if min(q) != 0.0:
@@ -93,42 +106,86 @@ if __name__ == "__main__":
     my_logger.info('Output prefix: %s', args.output)
     my_logger.info('Mode: %s', args.mode)
 
-    qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side = saxs.denss_multiple(
-        scattering_data = np.array([[I, q, sigq], [I[:-5], q[:-5], sigq[:-5]]]),
-        dmax=args.dmax,
-        ne=args.ne,
-        voxel=args.voxel,
-        oversampling=args.oversampling,
-        limit_dmax=args.limit_dmax,
-        limit_dmax_steps=args.limit_dmax_steps,
-        recenter=args.recenter,
-        recenter_steps=args.recenter_steps,
-        recenter_mode=args.recenter_mode,
-        positivity=args.positivity,
-        flatten_low_density=args.flatten_low_density,
-        minimum_density=args.minimum_density,
-        maximum_density=args.maximum_density,
-        extrapolate=args.extrapolate,
-        output=args.output,
-        steps=args.steps,
-        ncs=args.ncs,
-        ncs_steps=args.ncs_steps,
-        ncs_axis=args.ncs_axis,
-        seed=args.seed,
-        shrinkwrap=args.shrinkwrap,
-        shrinkwrap_sigma_start=args.shrinkwrap_sigma_start,
-        shrinkwrap_sigma_end=args.shrinkwrap_sigma_end,
-        shrinkwrap_sigma_decay=args.shrinkwrap_sigma_decay,
-        shrinkwrap_threshold_fraction=args.shrinkwrap_threshold_fraction,
-        shrinkwrap_iter=args.shrinkwrap_iter,
-        shrinkwrap_minstep=args.shrinkwrap_minstep,
-        chi_end_fraction=args.chi_end_fraction,
-        write_xplor_format=args.write_xplor_format,
-        write_freq=args.write_freq,
-        enforce_connectivity=args.enforce_connectivity,
-        enforce_connectivity_steps=args.enforce_connectivity_steps,
-        cutout=args.cutout,
-        my_logger=my_logger)
+    if args.file != None:
+        qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side = saxs.denss(
+            I = I,
+            q = q,
+            sigq = sigq,
+            dmax=args.dmax,
+            ne=args.ne,
+            voxel=args.voxel,
+            oversampling=args.oversampling,
+            limit_dmax=args.limit_dmax,
+            limit_dmax_steps=args.limit_dmax_steps,
+            recenter=args.recenter,
+            recenter_steps=args.recenter_steps,
+            recenter_mode=args.recenter_mode,
+            positivity=args.positivity,
+            flatten_low_density=args.flatten_low_density,
+            minimum_density=args.minimum_density,
+            maximum_density=args.maximum_density,
+            extrapolate=args.extrapolate,
+            output=args.output,
+            steps=args.steps,
+            ncs=args.ncs,
+            ncs_steps=args.ncs_steps,
+            ncs_axis=args.ncs_axis,
+            seed=args.seed,
+            shrinkwrap=args.shrinkwrap,
+            shrinkwrap_sigma_start=args.shrinkwrap_sigma_start,
+            shrinkwrap_sigma_end=args.shrinkwrap_sigma_end,
+            shrinkwrap_sigma_decay=args.shrinkwrap_sigma_decay,
+            shrinkwrap_threshold_fraction=args.shrinkwrap_threshold_fraction,
+            shrinkwrap_iter=args.shrinkwrap_iter,
+            shrinkwrap_minstep=args.shrinkwrap_minstep,
+            chi_end_fraction=args.chi_end_fraction,
+            write_xplor_format=args.write_xplor_format,
+            write_freq=args.write_freq,
+            enforce_connectivity=args.enforce_connectivity,
+            enforce_connectivity_steps=args.enforce_connectivity_steps,
+            cutout=args.cutout,
+            my_logger=my_logger)
+
+    ## Runs denss_multiple if there are multiple file inputs
+    elif args.filemultiple != None and len(scattering_data) > 0:
+        qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side = saxs.denss_multiple(
+            scattering_data = scattering_data,
+            dmax=args.dmax,
+            ne=args.ne,
+            voxel=args.voxel,
+            oversampling=args.oversampling,
+            limit_dmax=args.limit_dmax,
+            limit_dmax_steps=args.limit_dmax_steps,
+            recenter=args.recenter,
+            recenter_steps=args.recenter_steps,
+            recenter_mode=args.recenter_mode,
+            positivity=args.positivity,
+            flatten_low_density=args.flatten_low_density,
+            minimum_density=args.minimum_density,
+            maximum_density=args.maximum_density,
+            extrapolate=args.extrapolate,
+            output=args.output,
+            steps=args.steps,
+            ncs=args.ncs,
+            ncs_steps=args.ncs_steps,
+            ncs_axis=args.ncs_axis,
+            seed=args.seed,
+            shrinkwrap=args.shrinkwrap,
+            shrinkwrap_sigma_start=args.shrinkwrap_sigma_start,
+            shrinkwrap_sigma_end=args.shrinkwrap_sigma_end,
+            shrinkwrap_sigma_decay=args.shrinkwrap_sigma_decay,
+            shrinkwrap_threshold_fraction=args.shrinkwrap_threshold_fraction,
+            shrinkwrap_iter=args.shrinkwrap_iter,
+            shrinkwrap_minstep=args.shrinkwrap_minstep,
+            chi_end_fraction=args.chi_end_fraction,
+            write_xplor_format=args.write_xplor_format,
+            write_freq=args.write_freq,
+            enforce_connectivity=args.enforce_connectivity,
+            enforce_connectivity_steps=args.enforce_connectivity_steps,
+            cutout=args.cutout,
+            my_logger=my_logger)
+    else:
+        print("Something went wrong and denss didn't run - JAS did it")
 
     print args.output
 

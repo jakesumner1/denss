@@ -1330,7 +1330,7 @@ def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., over
         supportV[j] = np.sum(support)*dV
 
         ## Creates an array of the standard deviation of the last 100 chi^2 values for each scattering profile ~JAS
-        ## averages them together ~JAS-[]
+        ## averages them together ~JAS
         chi_last = []
         for k in range(len(scattering_data)):
             chi_last.append(np.std(chi_array[k][j-100:j]))

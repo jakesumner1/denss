@@ -12,10 +12,14 @@ try:
 except ImportError:
     matplotlib_found = False
 
+## ADDED '-fm' input for multiple files of different scattering contrasts ~JAS
+
+
 def parse_arguments(parser,gnomdmax=None):
 
     parser.add_argument("--version", action="version",version="%(prog)s v{version}".format(version=__version__))
     parser.add_argument("-f", "--file", type=str, help="SAXS data file for input (either .dat or .out)")
+    parser.add_argument("-fm", "--filemultiple", nargs = '+', type=str, help="Input multiple SAXS/SANS scattering profiles for complex analysis (.dat or .out). Include spaces between each file.")
     parser.add_argument("-u", "--units", default="a", type=str, help="Angular units (\"a\" [1/angstrom] or \"nm\" [1/nanometer]; default=\"a\")")
     parser.add_argument("-d", "--dmax", default=None, type=float, help="Estimated maximum dimension")
     parser.add_argument("-v", "--voxel", default=None, type=float, help="Set desired voxel size, setting resolution of map")
@@ -81,9 +85,20 @@ def parse_arguments(parser,gnomdmax=None):
         parser.set_defaults(plot=False)
     args = parser.parse_args()
 
+    ## Added this in case people flag both args for some reason ~JAS
+    if args.file != None and args.filemultiple != None:
+        print ("You flagged both -f and -fm at the same time")
+        print ("This will cause the program to have errors")
+        print ("Please only flag one or the other")
+
+    ## Added condition for filemultiple as a placeholder since I didn't want the code to crash ~JAS
     if args.output is None:
-        basename, ext = os.path.splitext(args.file)
-        args.output = basename
+        if args.file != None:
+            basename, ext = os.path.splitext(args.file)
+            args.output = basename
+        elif args.filemultiple != None:
+            basename, ext = os.path.splitext(args.filemultiple[0]) #just use the first filename
+            args.output = "contrast_var_" + basename
     else:
         args.output = args.output
 
