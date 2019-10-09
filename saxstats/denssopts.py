@@ -19,7 +19,8 @@ def parse_arguments(parser,gnomdmax=None):
 
     parser.add_argument("--version", action="version",version="%(prog)s v{version}".format(version=__version__))
     parser.add_argument("-f", "--file", type=str, help="SAXS data file for input (either .dat or .out)")
-    parser.add_argument("-fm", "--filemultiple", nargs = '+', type=str, help="Input multiple SAXS/SANS scattering profiles for complex analysis (.dat or .out). Include spaces between each file.")
+    parser.add_argument("-fm", "--filemultiple", default = None, nargs = '+', type=str, help="Input multiple SAXS/SANS scattering profiles for complex analysis (.dat or .out). Include spaces between each file.")
+    parser.add_argument("-sld", "--scattering_length_densities", default = None, nargs="+", type=float, help="Input scattering length densities that correspond to files entered with -fm. Add spcaes between each number." )
     parser.add_argument("-u", "--units", default="a", type=str, help="Angular units (\"a\" [1/angstrom] or \"nm\" [1/nanometer]; default=\"a\")")
     parser.add_argument("-d", "--dmax", default=None, type=float, help="Estimated maximum dimension")
     parser.add_argument("-v", "--voxel", default=None, type=float, help="Set desired voxel size, setting resolution of map")

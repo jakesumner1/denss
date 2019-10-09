@@ -951,7 +951,7 @@ def denss(q, I, sigq, dmax, ne=None, voxel=5., oversampling=3., limit_dmax=False
 
     return qdata, Idata, sigqdata, qbinsc, Imean[j], chi, rg, supportV, rho, side
 
-def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., oversampling=3., limit_dmax=False,
+def denss_multiple(scattering_data, sld, dmax, nProfiles = 1, ne=None, voxel=5., oversampling=3., limit_dmax=False,
     limit_dmax_steps=[500], recenter=True, recenter_steps=None,
     recenter_mode="com", positivity=True, extrapolate=True, output="map",
     steps=None, seed=None,  minimum_density=None,  maximum_density=None,
@@ -979,9 +979,18 @@ def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., over
             my_logger.info('Aborted!')
             return []
 
+    if len(sld) != len(scattering_data):
+        print("Scattering length densities do not line up with dataset\n"
+            "Please make sure there is a scattering length density for each file\n"
+            "Specified in -fm")
+        return []
+
     fprefix = os.path.join(path, output)
 
     D = dmax
+
+    #change scattering length densities list to a numpy array
+    sld = np.array(sld)
 
     my_logger.info('q range of input data: %3.3f < q < %3.3f', scattering_data[0][1].min(), scattering_data[0][1].max()) ##ADDRESS THE CHANGE TO Q IN LOGGER
     my_logger.info('Maximum dimension: %3.3f', D)
@@ -1104,6 +1113,10 @@ def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., over
     supportV = np.zeros((steps+1))                                        #just need for averaged model
     support = np.ones(x.shape,dtype=bool)                                 #just need for averaged model
 
+    Imean_comb = np.zeros((steps+1, len(qbins)))
+    chi_comb = np.zeros(steps+1)
+    rg_comb = np.zeros(steps+1)
+
     if seed is None:
         #Have to reset the random seed to get a random in different from other processes
         prng = np.random.RandomState()
@@ -1159,12 +1172,12 @@ def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., over
         F_array = np.zeros((len(scattering_data), x_.size, x_.size, x_.size)) #has the structure factors for each scattering profile
         newrho_array = np.zeros((len(scattering_data), x_.size, x_.size, x_.size))
 
-        ## Separate for loop to get the updated densities for each scattering profile
+        ## Separate for loop to get the updated densities for each scattering profile ~JAS
         for k in range(len(scattering_data)):
-            # k = scattering profile index
-            # j = step
-
-            F_array[k] = np.fft.fftn(rho)
+            # k = scattering profile index ~JAS
+            # j = step ~JAS
+            # multiply rho by the corresponding sld each time
+            F_array[k] = np.fft.fftn(rho - sld[k])
 
             #APPLY RECIPROCAL SPACE RESTRAINTS
             #calculate spherical average of intensities from 3D Fs
@@ -1195,6 +1208,7 @@ def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., over
                 write_mrc(rhoprime/dV, side, fprefix+"_current.mrc")
             rg_array[k][j] = rho2rg(rhoprime,r=r,support=support,dx=dx)
             newrho_array[k] = np.zeros_like(rho)
+            rhoprime += sld[k]
 
             #Error Reduction
             newrho_array[k][support] = rhoprime[support]
@@ -1204,8 +1218,13 @@ def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., over
         #Figure out what to do for combining all of the electron densities here....I'm not sure what to do at the moment. ~JAS
         #################################################################################################################
 
-        ##Going to average all of the densities together equally into "newrho"~JAS
+        ## Going to average all of the densities together equally into "newrho"~JAS
         newrho = np.average(newrho_array, axis = 0) #axis = 0 averages everything based on the column it is in - output is 3D density array
+        
+        ## Averaging all of the Imean, chi, and rg values because it makes the logging easier
+        # Imean_comb[j] = np.average(Imean_array[:][j], axis = 0)
+        # chi_comb[j] = np.average(chi_array[:][j], axis = 0)
+        # rg_comb[j] = np.average(rg_array[:][j], axis = 0)
 
         #enforce positivity by making all negative density points zero.
         if positivity:
@@ -1353,18 +1372,23 @@ def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., over
 
         rho = newrho
 
-    F = np.fft.fftn(rho)
-    #calculate spherical average intensity from 3D Fs
-    Imean[j+1] = ndimage.mean(np.abs(F)**2, labels=qbin_labels, index=np.arange(0,qbin_labels.max()+1))
-    #chi[j+1] = np.sum(((Imean[j+1,qbin_args]-Idata)/sigqdata)**2)/qbin_args.size
+    ## Have to average all of the densities together one more time for the final reconstruction - JAS
+    temp_rho_array = []
+    for k in range(len(scattering_data)):    
+        F = np.fft.fftn(rho)
+        #calculate spherical average intensity from 3D Fs
+        Imean_array[k][j+1] = ndimage.mean(np.abs(F)**2, labels=qbin_labels, index=np.arange(0,qbin_labels.max()+1))
+        #chi[j+1] = np.sum(((Imean[j+1,qbin_args]-Idata)/sigqdata)**2)/qbin_args.size
 
-    #scale Fs to match data
-    factors = np.ones((len(qbins)))
-    factors[qbin_args] = np.sqrt(Idata/Imean[j+1,qbin_args])
-    F *= factors[qbin_labels]
-    rho = np.fft.ifftn(F,rho.shape)
-    rho = rho.real
+        #scale Fs to match data
+        factors = np.ones((len(qbins)))
+        factors[qbin_args_array[k]] = np.sqrt(Idata_array[k]/Imean_array[k][j+1,qbin_args_array[k]])
+        F *= factors[qbin_labels]
+        rho = np.fft.ifftn(F,rho.shape)
+        rho = rho.real
+        temp_rho_array.append(rho)
 
+    rho = np.average(temp_rho_array, axis = 0)
     #negative images yield the same scattering, so flip the image
     #to have more positive than negative values if necessary
     #to make sure averaging is done properly
@@ -1377,8 +1401,8 @@ def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., over
     #scale total number of electrons
     if ne is not None:
         rho *= ne / np.sum(rho)
-
-    rg[j+1] = rho2rg(rho=rho,r=r,support=support,dx=dx)
+    for k in range(len(scattering_data)):
+        rg_array[k][j+1] = rho2rg(rho=rho,r=r,support=support,dx=dx)
     supportV[j+1] = supportV[j]
 
     #change rho to be the electron density in e-/angstroms^3, rather than number of electrons,
@@ -1417,33 +1441,35 @@ def denss_multiple(scattering_data, dmax, nProfiles = 1, ne=None, voxel=5., over
     write_mrc(np.ones_like(rho)*support,side, fprefix+"_support.mrc")
 
     #Write some more output files
-    fit = np.zeros(( len(qbinsc),5 ))
-    fit[:len(qdata),0] = qdata
-    fit[:len(Idata),1] = Idata
-    fit[:len(sigqdata),2] = sigqdata
-    fit[:len(qbinsc),3] = qbinsc
-    fit[:len(Imean[j+1]),4] = Imean[j+1]
-    np.savetxt(fprefix+'_map.fit', fit, delimiter=' ', fmt='%.5e',
-        header='q(data),I(data),error(data),q(density),I(density)')
+    for k in range(len(scattering_data)):
+        fit = np.zeros((len(qbinsc),5 ))
+        fit[:len(qdata_array[k]),0] = qdata_array[k]
+        fit[:len(Idata_array[k]),1] = Idata_array[k]
+        fit[:len(sigq_data_array[k]),2] = sigq_data_array[k]
+        fit[:len(qbinsc),3] = qbinsc
+        fit[:len(Imean_array[k][j+1]),4] = Imean_array[k][j+1]
+        np.savetxt(fprefix + "_" + str(k) + "_" +'_map.fit', fit, delimiter=' ', fmt='%.5e',
+            header='q(data),I(data),error(data),q(density),I(density)')
 
-    np.savetxt(fprefix+'_stats_by_step.dat',np.vstack((chi, rg, supportV)).T,
-        delimiter=" ", fmt="%.5e", header='Chi2 Rg SupportVolume')
+        np.savetxt(fprefix+ "_" + str(k) + "_" +'_stats_by_step.dat',np.vstack((chi_array[k], rg_array[k], supportV)).T,
+            delimiter=" ", fmt="%.5e", header='Chi2 Rg SupportVolume')
 
     my_logger.info('FINISHED DENSITY REFINEMENT')
     my_logger.info('Number of steps: %i', j)
-    my_logger.info('Final Chi2: %.3e', chi[j])
-    my_logger.info('Final Rg: %3.3f', rg[j+1])
+    my_logger.info('Final Average Chi2: %.3e', chi_avg_curr)    # Modified to be the average chi2
+    my_logger.info('Final Average Rg: %3.3f', rg_avg_curr)      # Modified to be the average rg
     my_logger.info('Final Support Volume: %3.3f', supportV[j+1])
     # my_logger.info('END')
 
     #return original unscaled values of Idata (and therefore Imean) for comparison with real data
-    Idata /= scale_factor
-    sigqdata /= scale_factor
-    Imean /= scale_factor
-    I /= scale_factor
-    sigq /= scale_factor
+    for k in range(len(scattering_data)):
+        Idata_array[k] /= scale_factor_array[k]
+        sigq_data_array[k] /= scale_factor_array[k]
+        Imean_array[k] /= scale_factor_array[k]
+        scattering_data[k][0] /= scale_factor_array[k] #I
+        scattering_data[k][2] /= scale_factor_array[k] #sigq
 
-    return qdata, Idata, sigqdata, qbinsc, Imean[j], chi, rg, supportV, rho, side
+    return qdata_array, Idata_array, sigq_data_array, qbinsc, Imean_array, chi_array, rg_array, supportV, rho, side
 
 def center_rho_roll(rho):
     """Move electron density map so its center of mass aligns with the center of the grid"""

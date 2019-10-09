@@ -58,8 +58,9 @@ elif initargs.filemultiple != None:
         q, I, sigq, dmax, isout = saxs.loadProfile(fname, units=initargs.units)
         scattering_data.append([I,q,sigq])
         temp_dmax.append(dmax)
-## finally, get the largest Dmax from the temp_dmax list ~JAS
-dmax = max(temp_dmax)
+    ## finally, get the largest Dmax from the temp_dmax list ~JAS
+    dmax = max(temp_dmax)
+
 scattering_data = np.array(scattering_data) #turn into numpy array for calculations ~JAS
 
 if not initargs.force_run:
@@ -150,6 +151,7 @@ if __name__ == "__main__":
     elif args.filemultiple != None and len(scattering_data) > 0:
         qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side = saxs.denss_multiple(
             scattering_data = scattering_data,
+            sld = args.scattering_length_densities,
             dmax=args.dmax,
             ne=args.ne,
             voxel=args.voxel,
