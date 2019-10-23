@@ -1169,7 +1169,7 @@ def denss_multiple(scattering_data, sld, dmax, nProfiles = 1, ne=None, voxel=5.,
             if abort_event.is_set():
                 my_logger.info('Aborted!')
                 return []
-        F_array = np.zeros((len(scattering_data), x_.size, x_.size, x_.size)) #has the structure factors for each scattering profile
+        F_array = np.zeros((len(scattering_data), x_.size, x_.size, x_.size), dtype = complex) #has the structure factors for each scattering profile
         newrho_array = np.zeros((len(scattering_data), x_.size, x_.size, x_.size))
 
         ## Separate for loop to get the updated densities for each scattering profile ~JAS

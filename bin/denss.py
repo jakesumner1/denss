@@ -191,77 +191,78 @@ if __name__ == "__main__":
 
     print args.output
 
-    fit = np.zeros(( len(qbinsc),5 ))
-    fit[:len(qdata),0] = qdata
-    fit[:len(Idata),1] = Idata
-    fit[:len(sigqdata),2] = sigqdata
-    fit[:len(qbinsc),3] = qbinsc
-    fit[:len(Imean),4] = Imean
-    # np.savetxt(args.output+'_map.fit',fit,delimiter=' ',fmt='%.5e', header='q(data),I(data),error(data),q(density),I(density)')
-    # np.savetxt(args.output+'_stats_by_step.dat',np.vstack((chis, rg, supportV)).T,delimiter=" ",fmt="%.5e",header='Chi2 Rg SupportVolume')
+    if args.filemultiple == None:
+        fit = np.zeros(( len(qbinsc),5 ))
+        fit[:len(qdata),0] = qdata
+        fit[:len(Idata),1] = Idata
+        fit[:len(sigqdata),2] = sigqdata
+        fit[:len(qbinsc),3] = qbinsc
+        fit[:len(Imean),4] = Imean
+        # np.savetxt(args.output+'_map.fit',fit,delimiter=' ',fmt='%.5e', header='q(data),I(data),error(data),q(density),I(density)')
+        # np.savetxt(args.output+'_stats_by_step.dat',np.vstack((chis, rg, supportV)).T,delimiter=" ",fmt="%.5e",header='Chi2 Rg SupportVolume')
 
-    if args.plot and matplotlib_found:
-        f = plt.figure(figsize=[6,6])
-        gs = gridspec.GridSpec(2, 1, height_ratios=[3,1])
+        if args.plot and matplotlib_found:
+            f = plt.figure(figsize=[6,6])
+            gs = gridspec.GridSpec(2, 1, height_ratios=[3,1])
 
-        ax0 = plt.subplot(gs[0])
-        #handle sigq values whose error bounds would go negative and be missing on the log scale
-        sigq2 = np.copy(sigq)
-        sigq2[sigq>I] = I[sigq>I]*.999
-        ax0.errorbar(q[q<=qdata[-1]], I[q<=qdata[-1]], fmt='k-', yerr=[sigq2[q<=qdata[-1]],sigq[q<=qdata[-1]]], capsize=0, elinewidth=0.1, ecolor=cc.to_rgba('0',alpha=0.5),label='Supplied Data')
-        ax0.plot(qdata, Idata, 'bo',alpha=0.5,label='Interpolated Data')
-        ax0.plot(qbinsc,Imean,'r.',label='Scattering from Density')
-        handles,labels = ax0.get_legend_handles_labels()
-        handles = [handles[2], handles[0], handles[1]]
-        labels = [labels[2], labels[0], labels[1]]
-        ymin = np.min(np.hstack((I,Idata,Imean)))
-        ymax = np.max(np.hstack((I,Idata,Imean)))
-        ax0.set_ylim([0.5*ymin,1.5*ymax])
-        ax0.legend(handles,labels)
-        ax0.semilogy()
-        ax0.set_ylabel('I(q)')
+            ax0 = plt.subplot(gs[0])
+            #handle sigq values whose error bounds would go negative and be missing on the log scale
+            sigq2 = np.copy(sigq)
+            sigq2[sigq>I] = I[sigq>I]*.999
+            ax0.errorbar(q[q<=qdata[-1]], I[q<=qdata[-1]], fmt='k-', yerr=[sigq2[q<=qdata[-1]],sigq[q<=qdata[-1]]], capsize=0, elinewidth=0.1, ecolor=cc.to_rgba('0',alpha=0.5),label='Supplied Data')
+            ax0.plot(qdata, Idata, 'bo',alpha=0.5,label='Interpolated Data')
+            ax0.plot(qbinsc,Imean,'r.',label='Scattering from Density')
+            handles,labels = ax0.get_legend_handles_labels()
+            handles = [handles[2], handles[0], handles[1]]
+            labels = [labels[2], labels[0], labels[1]]
+            ymin = np.min(np.hstack((I,Idata,Imean)))
+            ymax = np.max(np.hstack((I,Idata,Imean)))
+            ax0.set_ylim([0.5*ymin,1.5*ymax])
+            ax0.legend(handles,labels)
+            ax0.semilogy()
+            ax0.set_ylabel('I(q)')
 
-        ax1 = plt.subplot(gs[1])
-        ax1.plot(qdata, qdata*0, 'k--')
-        residuals = np.log10(Imean[np.in1d(qbinsc,qdata)])-np.log10(Idata)
-        ax1.plot(qdata, residuals, 'ro-')
-        ylim = ax1.get_ylim()
-        ymax = np.max(np.abs(ylim))
-        n = int(.9*len(residuals))
-        ymax = np.max(np.abs(residuals[:-n]))
-        ax1.set_ylim([-ymax,ymax])
-        ax1.yaxis.major.locator.set_params(nbins=5)
-        xlim = ax0.get_xlim()
-        ax1.set_xlim(xlim)
-        ax1.set_ylabel('Residuals')
-        ax1.set_xlabel(r'q ($\mathrm{\AA^{-1}}$)')
-        #plt.setp(ax0.get_xticklabels(), visible=False)
-        plt.tight_layout()
-        plt.savefig(args.output+'_fit.png',dpi=150)
-        plt.close()
+            ax1 = plt.subplot(gs[1])
+            ax1.plot(qdata, qdata*0, 'k--')
+            residuals = np.log10(Imean[np.in1d(qbinsc,qdata)])-np.log10(Idata)
+            ax1.plot(qdata, residuals, 'ro-')
+            ylim = ax1.get_ylim()
+            ymax = np.max(np.abs(ylim))
+            n = int(.9*len(residuals))
+            ymax = np.max(np.abs(residuals[:-n]))
+            ax1.set_ylim([-ymax,ymax])
+            ax1.yaxis.major.locator.set_params(nbins=5)
+            xlim = ax0.get_xlim()
+            ax1.set_xlim(xlim)
+            ax1.set_ylabel('Residuals')
+            ax1.set_xlabel(r'q ($\mathrm{\AA^{-1}}$)')
+            #plt.setp(ax0.get_xticklabels(), visible=False)
+            plt.tight_layout()
+            plt.savefig(args.output+'_fit.png',dpi=150)
+            plt.close()
 
-        plt.plot(chis[chis>0])
-        plt.xlabel('Step')
-        plt.ylabel('$\chi^2$')
-        plt.semilogy()
-        plt.tight_layout()
-        plt.savefig(args.output+'_chis.png',dpi=150)
-        plt.close()
+            plt.plot(chis[chis>0])
+            plt.xlabel('Step')
+            plt.ylabel('$\chi^2$')
+            plt.semilogy()
+            plt.tight_layout()
+            plt.savefig(args.output+'_chis.png',dpi=150)
+            plt.close()
 
-        plt.plot(rg[rg!=0])
-        plt.xlabel('Step')
-        plt.ylabel('Rg')
-        plt.tight_layout()
-        plt.savefig(args.output+'_rgs.png',dpi=150)
-        plt.close()
+            plt.plot(rg[rg!=0])
+            plt.xlabel('Step')
+            plt.ylabel('Rg')
+            plt.tight_layout()
+            plt.savefig(args.output+'_rgs.png',dpi=150)
+            plt.close()
 
-        plt.plot(supportV[supportV>0])
-        plt.xlabel('Step')
-        plt.ylabel('Support Volume ($\mathrm{\AA^{3}}$)')
-        plt.semilogy()
-        plt.tight_layout()
-        plt.savefig(args.output+'_supportV.png',dpi=150)
-        plt.close()
+            plt.plot(supportV[supportV>0])
+            plt.xlabel('Step')
+            plt.ylabel('Support Volume ($\mathrm{\AA^{3}}$)')
+            plt.semilogy()
+            plt.tight_layout()
+            plt.savefig(args.output+'_supportV.png',dpi=150)
+            plt.close()
 
     logging.info('END')
 
