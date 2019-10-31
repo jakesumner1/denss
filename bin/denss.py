@@ -153,6 +153,7 @@ if __name__ == "__main__":
             scattering_data = scattering_data,
             sld = args.scattering_length_densities,
             dmax=args.dmax,
+            avg_steps = args.avg_steps,
             ne=args.ne,
             voxel=args.voxel,
             oversampling=args.oversampling,

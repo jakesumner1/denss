@@ -14,12 +14,33 @@ except ImportError:
 
 ## ADDED '-fm' input for multiple files of different scattering contrasts ~JAS
 
+def param_file_handler(line):
+    '''
+    Small function that helps with handling of the parameter file input JAS
+    '''
+    file, file_args = line.split(':')
+    file_args = file_args.strip().split(';')
+    file_arg_dict = {val.split("==")[0]:val.split("==")[1] for val in file_args}
+    for ele in file_arg_dict.keys():
+        try:
+            if ele == 'minimum_density' or ele == 'maximum_density': #should be float
+                file_arg_dict[ele] = float(file_arg_dict[ele])
+            elif file_arg_dict[ele][0] == "[": #should be a list
+                temp = file_arg_dict[ele].strip("[").strip("]").split(",")
+                file_arg_dict[ele] = [int(num.strip()) for num in temp]
+            else: #should be integer
+                file_arg_dict[ele] = int(file_arg_dict[ele])
+        except ValueError: #if the value isn't an integer/float/list of integers
+            continue
+    return file, file_arg_dict
 
 def parse_arguments(parser,gnomdmax=None):
 
     parser.add_argument("--version", action="version",version="%(prog)s v{version}".format(version=__version__))
     parser.add_argument("-f", "--file", type=str, help="SAXS data file for input (either .dat or .out)")
     parser.add_argument("-fm", "--filemultiple", default = None, nargs = '+', type=str, help="Input multiple SAXS/SANS scattering profiles for complex analysis (.dat or .out). Include spaces between each file.")
+    parser.add_argument("-paramf", "--parameter_file", default = None, type=file, help="Specify input parameters for each file per line and keep the same ordering for the files as they are entered on the command line.")
+    parser.add_argument("-avg_steps", "--avg_steps", default = 1, type=int, help="Number of steps before all Neutron Contrast data is averaged together. Only applies to -fm or --filemultiple")
     parser.add_argument("-sld", "--scattering_length_densities", default = None, nargs="+", type=float, help="Input scattering length densities that correspond to files entered with -fm. Add spcaes between each number." )
     parser.add_argument("-u", "--units", default="a", type=str, help="Angular units (\"a\" [1/angstrom] or \"nm\" [1/nanometer]; default=\"a\")")
     parser.add_argument("-d", "--dmax", default=None, type=float, help="Estimated maximum dimension")
@@ -134,7 +155,151 @@ def parse_arguments(parser,gnomdmax=None):
         recenter_steps = range(501,8002,500)
     else:
         args.mode = "None"
+    
+    ## Handles mutiple, unique parameters for each contrast ~JAS
+    ## Will run now by default, since denss_multiple() was rewritten to account for multiple inputs
+    ## Default running doesn't change how the code works, only the data structures of the arguments allowing for scalability
+    if args.filemultiple != None:
 
+        #all the arguments that can be unique for each file
+        include_args = [
+        'positivity', 'flatten_low_density', 'minimum_density', 'maximum_density', 'ncs',
+        'ncs_axis', 'ncs_steps', 'recenter', 'recenter_steps', 'recenter_mode', 'shrinkwrap',
+        'shrinkwrap_minstep', 'shrinkwrap_iter', 'enforce_connectivity', 'enforce_connectivity_steps',
+        'limit_dmax', 'limit_dmax_steps', 'mode'
+        ]
+        filemultiple = args.filemultiple
+        #initialize all modifiable parameters as lists of length 'k' (number of contrast files)
+        for temp_param in include_args:
+            #couldn't generalize around the dot operator so I caved and listed them
+            if temp_param == "positivity":
+                args.positivity = [args.positivity]*len(filemultiple)
+            if temp_param == "flatten_low_density":
+                args.flatten_low_density = [args.flatten_low_density]*len(filemultiple)
+            if temp_param == "minimum_density":
+                args.minimum_density = [args.minimum_density]*len(filemultiple)
+            if temp_param == "maximum_density":
+                args.maximum_density = [args.maximum_density]*len(filemultiple)
+            if temp_param == "ncs":
+                args.ncs = [args.ncs]*len(filemultiple)
+            if temp_param == "ncs_axis":
+                args.ncs_axis = [args.ncs_axis]*len(filemultiple)
+            if temp_param == "ncs_steps":
+                args.ncs_steps = [args.ncs_steps]*len(filemultiple)
+            if temp_param == "recenter":
+                args.recenter = [args.recenter]*len(filemultiple)
+            if temp_param == "recenter_steps":
+                args.recenter_steps = [args.recenter_steps]*len(filemultiple)
+            if temp_param == "recenter_mode":
+                args.recenter_mode = [args.recenter_mode]*len(filemultiple)
+            if temp_param == "shrinkwrap":
+                args.shrinkwrap = [args.shrinkwrap]*len(filemultiple)
+            if temp_param == "shrinkwrap_minstep":
+                args.shrinkwrap_minstep = [args.shrinkwrap_minstep]*len(filemultiple)
+            if temp_param == "shrinkwrap_iter":
+                args.shrinkwrap_iter = [args.shrinkwrap_iter]*len(filemultiple)
+            if temp_param == "enforce_connectivity":
+                args.enforce_connectivity = [args.enforce_connectivity]*len(filemultiple)
+            if temp_param == "enforce_connectivity_steps":
+                args.enforce_connectivity_steps = [args.enforce_connectivity_steps]*len(filemultiple)
+            if temp_param == "limit_dmax":
+                args.limit_dmax = [args.limit_dmax]*len(filemultiple)
+            if temp_param == "limit_dmax_steps":
+                args.limit_dmax_steps = [args.limit_dmax_steps]*len(filemultiple)
+            if temp_param == "mode":
+                args.mode = [args.mode]*len(filemultiple)
+        if args.parameter_file != None:
+            ## There is a parameter file to edit individual parameters
+            args.parameter_file = [foo.strip() for foo in args.parameter_file]
+            temp_cfile_param_list = []
+            for k in range(len(args.parameter_file)):
+                cfname, cf_args = param_file_handler(args.parameter_file[k])
+                temp_cfile_param_list.append(cf_args)
+            for k in range(len(temp_cfile_param_list)): #list of dictionaries with indices corresponding to contrast files
+                for para, argval in temp_cfile_param_list[k].items():
+                    if para == "positivity":
+                        args.positivity[k] = argval
+                    if para == "flatten_low_density":
+                        args.flatten_low_density[k] = argval
+                    if para == "minimum_density":
+                        args.minimum_density[k] = argval
+                    if para == "maximum_density":
+                        args.maximum_density[k] = argval
+                    if para == "ncs":
+                        args.ncs[k] = argval
+                    if para == "ncs_axis":
+                        args.ncs_axis[k] = argval
+                    if para == "ncs_steps":
+                        args.ncs_steps[k] = argval
+                    if para == "recenter":
+                        args.recenter[k] = argval
+                    if para == "recenter_steps":
+                        args.recenter_steps[k] = argval
+                    if para == "recenter_mode":
+                        args.recenter_mode[k] = argval
+                    if para == "shrinkwrap":
+                        args.shrinkwrap[k] = argval
+                    if para == "shrinkwrap_minstep":
+                        args.shrinkwrap_minstep[k] = argval
+                    if para == "shrinkwrap_iter":
+                        args.shrinkwrap_iter[k] = argval
+                    if para == "enforce_connectivity":
+                        args.enforce_connectivity[k] = argval
+                    if para == "enforce_connectivity_steps":
+                        args.enforce_connectivity_steps[k] = argval
+                    if para == "limit_dmax":
+                        args.limit_dmax[k] = argval
+                    if para == "limit_dmax_steps":
+                        args.limit_dmax_steps[k] = argval
+                    if para == "mode":
+                        if argval[0].upper() == "F":
+                            args.mode[k] = "FAST"
+                            nsamples = 32
+                            args.shrinkwrap_minstep[k] = 1000
+                            args.enforce_connectivity_steps[k] = [2000]
+                            args.recenter_steps[k] = range(501,2502,500)
+                        elif argval[0].upper() == "S":
+                            args.mode[k] = "SLOW"
+                            nsamples = 64
+                            args.shrinkwrap_minstep[k] = 5000
+                            args.enforce_connectivity_steps[k] = [6000]
+                            args.recenter_steps[k] = range(501,8002,500)
+                        elif argval[0].upper() == "M":
+                            args.mode[k] = "MEMBRANE"
+                            nsamples = 64
+                            args.positivity[k] = False
+                            args.shrinkwrap_minstep[k] = 0
+                            shrinkwrap_threshold_fraction = 0.1
+                            args.enforce_connectivity_steps[k] = [300]
+                            args.recenter_steps[k] = range(501,8002,500)
+                        else:
+                            args.mode[k] = "None"
+
+        else: #no parameter file specified - default input
+            for k in range(len(filemultiple)):
+                if args.mode[k][0].upper() == "F":
+                    args.mode[k] = "FAST"
+                    nsamples = 32
+                    args.shrinkwrap_minstep[k] = 1000
+                    args.enforce_connectivity_steps[k] = [2000]
+                    args.recenter_steps[k] = range(501,2502,500)
+                elif args.mode[k][0].upper() == "S":
+                    args.mode[k] = "SLOW"
+                    nsamples = 64
+                    args.shrinkwrap_minstep[k] = 5000
+                    args.enforce_connectivity_steps[k] = [6000]
+                    args.recenter_steps[k] = range(501,8002,500)
+                elif args.mode[k][0].upper() == "M":
+                    args.mode[k] = "MEMBRANE"
+                    nsamples = 64
+                    args.positivity[k] = False
+                    args.shrinkwrap_minstep[k] = 0
+                    shrinkwrap_threshold_fraction = 0.1
+                    args.enforce_connectivity_steps[k] = [300]
+                    args.recenter_steps[k] = range(501,8002,500)
+                else:
+                    args.mode[k] = "None"
+                
     #allow user to explicitly modify those values by resetting them here to the user defined values
     if args.nsamples is not None:
         nsamples = args.nsamples
