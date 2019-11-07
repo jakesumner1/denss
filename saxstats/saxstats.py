@@ -951,7 +951,8 @@ def denss(q, I, sigq, dmax, ne=None, voxel=5., oversampling=3., limit_dmax=False
 
     return qdata, Idata, sigqdata, qbinsc, Imean[j], chi, rg, supportV, rho, side
 
-def denss_multiple(scattering_data, sld, dmax, avg_steps = 1, ne=None, voxel=5., oversampling=3., limit_dmax=False,
+def denss_multiple(scattering_data, scattering_length_densities, dmax, avg_steps = 1, ne=None, voxel=5., 
+    average_weights = [], oversampling=3., limit_dmax=False,
     limit_dmax_steps=[500], recenter=True, recenter_steps=None,
     recenter_mode="com", positivity=True, extrapolate=True, output="map",
     steps=None, seed=None,  minimum_density=None,  maximum_density=None,
@@ -978,7 +979,7 @@ def denss_multiple(scattering_data, sld, dmax, avg_steps = 1, ne=None, voxel=5.,
             my_logger.info('Aborted!')
             return []
 
-    if len(sld) != len(scattering_data):
+    if len(scattering_length_densities) != len(scattering_data):
         print("Scattering length densities do not line up with dataset\n"
             "Please make sure there is a scattering length density for each file\n"
             "Specified in -fm")
@@ -989,7 +990,7 @@ def denss_multiple(scattering_data, sld, dmax, avg_steps = 1, ne=None, voxel=5.,
     D = dmax
 
     #change scattering length densities list to a numpy array
-    sld = np.array(sld)
+    sld = np.array(scattering_length_densities)
 
     my_logger.info('q range of input data: %3.3f < q < %3.3f', scattering_data[0][1].min(), scattering_data[0][1].max()) ##ADDRESS THE CHANGE TO Q IN LOGGER
     my_logger.info('Maximum dimension: %3.3f', D)
@@ -1128,6 +1129,12 @@ def denss_multiple(scattering_data, sld, dmax, avg_steps = 1, ne=None, voxel=5.,
     else:
         rho = prng.random_sample(size=x.shape) #- 0.5
 
+    #in case it hasn't been initialized, all weights are equal to 1
+    if average_weights == []: 
+        average_weights = np.array([1.0]*len(scattering_data))
+    else:
+        average_weights = np.array(average_weights)
+
     sigma = shrinkwrap_sigma_start
     #convert density values to absolute number of electrons
     #since FFT and rho given in electrons, not density, until converted at the end
@@ -1174,7 +1181,7 @@ def denss_multiple(scattering_data, sld, dmax, avg_steps = 1, ne=None, voxel=5.,
         
         ## Averaging the densities of contrast data together after a set number of steps
         if (j-1)%avg_steps == 0 and j > 0:  #one after the step
-            rho_avg = np.average(rho_array, axis = 0) #averages all of the rhos together
+            rho_avg = np.average(rho_array, axis = 0, weights = average_weights) #averages all of the rhos together
             for k in range(len(rho_array)):
                 rho_array[k] = rho_avg
 
@@ -1246,7 +1253,7 @@ def denss_multiple(scattering_data, sld, dmax, avg_steps = 1, ne=None, voxel=5.,
             if ncs[k] != 0 and j in ncs_steps[k]:
                 rho_array[k] = align2xyz(rho_array[k])
 
-            if ncs[k] != 0 and j in [stepi+1 for stepi in ncs_steps]:
+            if ncs[k] != 0 and j in [stepi+1 for stepi in ncs_steps[k]]:
                 degrees = 360./ncs[k]
                 if ncs_axis[k] == 1: axes=(1,2)
                 if ncs_axis[k] == 2: axes=(0,2)
@@ -1344,8 +1351,11 @@ def denss_multiple(scattering_data, sld, dmax, avg_steps = 1, ne=None, voxel=5.,
         ## Creates an array of the standard deviation of the last 100 chi^2 values for each scattering profile ~JAS
         ## averages them together ~JAS
         chi_last = []
-        for k in range(len(scattering_data)):
-            chi_last.append(np.std(chi_array[k][j-100:j]))
+        if j > 100:
+            for k in range(len(scattering_data)):
+                chi_last.append(np.std(chi_array[k][j-100:j]))
+        else:
+            chi_last = [100000] ## number larger than the chi_end_fraction
         chi_last = np.array(chi_last)
         chi_avg_all = np.mean(chi_last)
 

@@ -42,6 +42,7 @@ def parse_arguments(parser,gnomdmax=None):
     parser.add_argument("-paramf", "--parameter_file", default = None, type=file, help="Specify input parameters for each file per line and keep the same ordering for the files as they are entered on the command line.")
     parser.add_argument("-avg_steps", "--avg_steps", default = 1, type=int, help="Number of steps before all Neutron Contrast data is averaged together. Only applies to -fm or --filemultiple")
     parser.add_argument("-sld", "--scattering_length_densities", default = None, nargs="+", type=float, help="Input scattering length densities that correspond to files entered with -fm. Add spcaes between each number." )
+    parser.add_argument("-avg_w", "--average_weights", default = None, nargs="+", type=float, help="Argument where you can input the weights used for density averaging parallel to the --filemultiple input.")
     parser.add_argument("-u", "--units", default="a", type=str, help="Angular units (\"a\" [1/angstrom] or \"nm\" [1/nanometer]; default=\"a\")")
     parser.add_argument("-d", "--dmax", default=None, type=float, help="Estimated maximum dimension")
     parser.add_argument("-v", "--voxel", default=None, type=float, help="Set desired voxel size, setting resolution of map")
@@ -166,7 +167,7 @@ def parse_arguments(parser,gnomdmax=None):
         'positivity', 'flatten_low_density', 'minimum_density', 'maximum_density', 'ncs',
         'ncs_axis', 'ncs_steps', 'recenter', 'recenter_steps', 'recenter_mode', 'shrinkwrap',
         'shrinkwrap_minstep', 'shrinkwrap_iter', 'enforce_connectivity', 'enforce_connectivity_steps',
-        'limit_dmax', 'limit_dmax_steps', 'mode'
+        'limit_dmax', 'limit_dmax_steps', 'mode', 'average_weights'
         ]
         filemultiple = args.filemultiple
         #initialize all modifiable parameters as lists of length 'k' (number of contrast files)
@@ -208,6 +209,8 @@ def parse_arguments(parser,gnomdmax=None):
                 args.limit_dmax_steps = [args.limit_dmax_steps]*len(filemultiple)
             if temp_param == "mode":
                 args.mode = [args.mode]*len(filemultiple)
+            if temp_param == "average_weights" and args.average_weights == None: #hasn't been initialized yet
+                args.average_weights = [1.0]*len(filemultiple) #gives equal weights per file by default
         if args.parameter_file != None:
             ## There is a parameter file to edit individual parameters
             args.parameter_file = [foo.strip() for foo in args.parameter_file]
@@ -251,6 +254,8 @@ def parse_arguments(parser,gnomdmax=None):
                         args.limit_dmax[k] = argval
                     if para == "limit_dmax_steps":
                         args.limit_dmax_steps[k] = argval
+                    if para == "average_weights":
+                        args.average_weights[k] = argval
                     if para == "mode":
                         if argval[0].upper() == "F":
                             args.mode[k] = "FAST"
