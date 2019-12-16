@@ -18,16 +18,21 @@ def param_file_handler(line):
     '''
     Small function that helps with handling of the parameter file input JAS
     '''
+    line = line.strip().strip(";")
     file, file_args = line.split(':')
     file_args = file_args.strip().split(';')
     file_arg_dict = {val.split("==")[0]:val.split("==")[1] for val in file_args}
     for ele in file_arg_dict.keys():
         try:
-            if ele == 'minimum_density' or ele == 'maximum_density': #should be float
+            if ele == 'minimum_density' or ele == 'maximum_density' or ele == 'buffer_scattering_length_densities' or ele == 'target_scattering_length_densities': #should be float
                 file_arg_dict[ele] = float(file_arg_dict[ele])
             elif file_arg_dict[ele][0] == "[": #should be a list
                 temp = file_arg_dict[ele].strip("[").strip("]").split(",")
                 file_arg_dict[ele] = [int(num.strip()) for num in temp]
+            elif file_arg_dict[ele][0] == 't' or file_arg_dict[ele][0] == 'T': #value is true
+                file_arg_dict[ele] = True
+            elif file_arg_dict[ele][0] == 'f' or file_arg_dict[ele][0] == 'F': #value is true
+                file_arg_dict[ele] = False
             else: #should be integer
                 file_arg_dict[ele] = int(file_arg_dict[ele])
         except ValueError: #if the value isn't an integer/float/list of integers
@@ -41,7 +46,8 @@ def parse_arguments(parser,gnomdmax=None):
     parser.add_argument("-fm", "--filemultiple", default = None, nargs = '+', type=str, help="Input multiple SAXS/SANS scattering profiles for complex analysis (.dat or .out). Include spaces between each file.")
     parser.add_argument("-paramf", "--parameter_file", default = None, type=file, help="Specify input parameters for each file per line and keep the same ordering for the files as they are entered on the command line.")
     parser.add_argument("-avg_steps", "--avg_steps", default = 1, type=int, help="Number of steps before all Neutron Contrast data is averaged together. Only applies to -fm or --filemultiple")
-    parser.add_argument("-sld", "--scattering_length_densities", default = None, nargs="+", type=float, help="Input scattering length densities that correspond to files entered with -fm. Add spcaes between each number." )
+    parser.add_argument("-bsld", "--buffer_scattering_length_densities", default = None, nargs="+", type=float, help="Input buffer scattering length densities that correspond to files entered with -fm. Add spaces between each number." )
+    parser.add_argument("-tsld", "--target_scattering_length_densities", default = None, nargs="+", type=float, help="Input target scattering length densities that correspond to files entered with -fm. Add spaces between each number." )
     parser.add_argument("-avg_w", "--average_weights", default = None, nargs="+", type=float, help="Argument where you can input the weights used for density averaging parallel to the --filemultiple input.")
     parser.add_argument("-u", "--units", default="a", type=str, help="Angular units (\"a\" [1/angstrom] or \"nm\" [1/nanometer]; default=\"a\")")
     parser.add_argument("-d", "--dmax", default=None, type=float, help="Estimated maximum dimension")
@@ -65,6 +71,8 @@ def parse_arguments(parser,gnomdmax=None):
     parser.add_argument("-rc_mode", "--recenter_mode", default="com", type=str, help="Recenter based on either center of mass (com, default) or maximum density value (max)")
     parser.add_argument("-p_on","--positivity_on", dest="positivity", action="store_true", help="Enforce positivity restraint inside support. (default)")
     parser.add_argument("-p_off","--positivity_off", dest="positivity", action="store_false", help="Do not enforce positivity restraint inside support.")
+    parser.add_argument("-neg_on","--negativity_on", dest="negativity", action="store_true", help="Enforce negativity restraint inside support. (default)")
+    parser.add_argument("-neg_off","--negativity_off", dest="negativity", action="store_false", help="Do not enforce negativity restraint inside support.")
     parser.add_argument("-fld_on","--flatten_low_density_on", dest="flatten_low_density", action="store_true", help="Density values near zero (.01 e-/A3) will be set to zero. (default)")
     parser.add_argument("-fld_off","--flatten_low_density_off", dest="flatten_low_density", action="store_false", help="Density values near zero (.01 e-/A3) will be not set to zero.")
     parser.add_argument("-min","--minimum_density", default=None, type=float, help="Minimum density value in e-/angstrom^3 (must also set --ne to be meaningful)")
@@ -96,6 +104,7 @@ def parse_arguments(parser,gnomdmax=None):
     parser.set_defaults(shrinkwrap=True)
     parser.set_defaults(recenter=True)
     parser.set_defaults(positivity=True)
+    parser.set_defaults(negativity=False) #set it as false by default
     parser.set_defaults(flatten_low_density=False)
     parser.set_defaults(extrapolate=True)
     parser.set_defaults(enforce_connectivity=True)
@@ -164,10 +173,11 @@ def parse_arguments(parser,gnomdmax=None):
 
         #all the arguments that can be unique for each file
         include_args = [
-        'positivity', 'flatten_low_density', 'minimum_density', 'maximum_density', 'ncs',
+        'positivity', 'negativity', 'flatten_low_density', 'minimum_density', 'maximum_density', 'ncs',
         'ncs_axis', 'ncs_steps', 'recenter', 'recenter_steps', 'recenter_mode', 'shrinkwrap',
         'shrinkwrap_minstep', 'shrinkwrap_iter', 'enforce_connectivity', 'enforce_connectivity_steps',
-        'limit_dmax', 'limit_dmax_steps', 'mode', 'average_weights'
+        'limit_dmax', 'limit_dmax_steps', 'mode', 'average_weights', 'buffer_scattering_length_densities',
+        'target_scattering_length_densities'
         ]
         filemultiple = args.filemultiple
         #initialize all modifiable parameters as lists of length 'k' (number of contrast files)
@@ -175,6 +185,8 @@ def parse_arguments(parser,gnomdmax=None):
             #couldn't generalize around the dot operator so I caved and listed them
             if temp_param == "positivity":
                 args.positivity = [args.positivity]*len(filemultiple)
+            if temp_param == "negativity":
+                args.negativity = [args.negativity]*len(filemultiple)
             if temp_param == "flatten_low_density":
                 args.flatten_low_density = [args.flatten_low_density]*len(filemultiple)
             if temp_param == "minimum_density":
@@ -211,6 +223,10 @@ def parse_arguments(parser,gnomdmax=None):
                 args.mode = [args.mode]*len(filemultiple)
             if temp_param == "average_weights" and args.average_weights == None: #hasn't been initialized yet
                 args.average_weights = [1.0]*len(filemultiple) #gives equal weights per file by default
+            if temp_param == "buffer_scattering_length_densities" and args.buffer_scattering_length_densities == None:
+                args.buffer_scattering_length_densities = [0.0]*len(filemultiple)
+            if temp_param == "target_scattering_length_densities" and args.target_scattering_length_densities == None:
+                args.target_scattering_length_densities = [0.0]*len(filemultiple)
         if args.parameter_file != None:
             ## There is a parameter file to edit individual parameters
             args.parameter_file = [foo.strip() for foo in args.parameter_file]
@@ -222,6 +238,8 @@ def parse_arguments(parser,gnomdmax=None):
                 for para, argval in temp_cfile_param_list[k].items():
                     if para == "positivity":
                         args.positivity[k] = argval
+                    if para == "negativity":
+                        args.negativity[k] = argval
                     if para == "flatten_low_density":
                         args.flatten_low_density[k] = argval
                     if para == "minimum_density":
@@ -256,6 +274,10 @@ def parse_arguments(parser,gnomdmax=None):
                         args.limit_dmax_steps[k] = argval
                     if para == "average_weights":
                         args.average_weights[k] = argval
+                    if para == "buffer_scattering_length_densities":
+                        args.buffer_scattering_length_densities[k] = argval
+                    if para == "target_scattering_length_densities":
+                        args.target_scattering_length_densities[k] = argval
                     if para == "mode":
                         if argval[0].upper() == "F":
                             args.mode[k] = "FAST"

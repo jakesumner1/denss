@@ -112,7 +112,8 @@ if __name__ == "__main__":
     if args.filemultiple != None and len(scattering_data) > 0:
         qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side = saxs.denss_multiple(
             scattering_data = scattering_data,
-            sld = args.scattering_length_densities,
+            bsld = args.buffer_scattering_length_densities,
+            tsld = args.target_scattering_length_densities,
             dmax=args.dmax,
             avg_steps = args.avg_steps,
             average_weights = args.average_weights,
@@ -125,6 +126,7 @@ if __name__ == "__main__":
             recenter_steps=args.recenter_steps,
             recenter_mode=args.recenter_mode,
             positivity=args.positivity,
+            negativity = args.negativity,
             flatten_low_density=args.flatten_low_density,
             minimum_density=args.minimum_density,
             maximum_density=args.maximum_density,

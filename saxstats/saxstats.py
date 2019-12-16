@@ -951,10 +951,10 @@ def denss(q, I, sigq, dmax, ne=None, voxel=5., oversampling=3., limit_dmax=False
 
     return qdata, Idata, sigqdata, qbinsc, Imean[j], chi, rg, supportV, rho, side
 
-def denss_multiple(scattering_data, scattering_length_densities, dmax, avg_steps = 1, ne=None, voxel=5., 
+def denss_multiple(scattering_data, bsld, dmax, tsld = None, avg_steps = 1, ne=None, voxel=5., 
     average_weights = [], oversampling=3., limit_dmax=False,
     limit_dmax_steps=[500], recenter=True, recenter_steps=None,
-    recenter_mode="com", positivity=True, extrapolate=True, output="map",
+    recenter_mode="com", positivity=True, negativity=False, extrapolate=True, output="map",
     steps=None, seed=None,  minimum_density=None,  maximum_density=None,
     flatten_low_density=True, rho_start=None, shrinkwrap=True,
     shrinkwrap_sigma_start=3, shrinkwrap_sigma_end=1.5,
@@ -979,18 +979,25 @@ def denss_multiple(scattering_data, scattering_length_densities, dmax, avg_steps
             my_logger.info('Aborted!')
             return []
 
-    if len(scattering_length_densities) != len(scattering_data):
+    if len(bsld) != len(scattering_data) or len(tsld) != len(scattering_data):
         print("Scattering length densities do not line up with dataset\n"
             "Please make sure there is a scattering length density for each file\n"
-            "Specified in -fm")
+            "Specified in -fm - check both the target and buffer SLDs")
         return []
 
     fprefix = os.path.join(path, output)
 
     D = dmax
 
-    #change scattering length densities list to a numpy array
-    sld = np.array(scattering_length_densities)
+    if tsld == [0.0]*len(tsld): #target SLD array is only zeros - no input
+        tsld = None #nullify tsld
+
+    if tsld is not None:
+        diff_sld = np.array([(max([bsld[k], tsld[k]]) - min([bsld[k], tsld[k]])) for k in range(len(bsld))])
+        min_sld = np.array([min([bsld[k], tsld[k]]) for k in range(len(bsld))])
+    #change buffer scattering length densities list to a numpy array
+    bsld = np.array(bsld)
+
 
     my_logger.info('q range of input data: %3.3f < q < %3.3f', scattering_data[0][1].min(), scattering_data[0][1].max()) ##ADDRESS THE CHANGE TO Q IN LOGGER
     my_logger.info('Maximum dimension: %3.3f', D)
@@ -1190,7 +1197,7 @@ def denss_multiple(scattering_data, scattering_length_densities, dmax, avg_steps
             # k = scattering profile index ~JAS
             # j = step ~JAS
             # correct rho_array[k] by the corresponding sld each time
-            F_array[k] = np.fft.fftn(rho_array[k] - sld[k])
+            F_array[k] = np.fft.fftn(rho_array[k] - bsld[k])
 
             #APPLY RECIPROCAL SPACE RESTRAINTS
             #calculate spherical average of intensities from 3D Fs
@@ -1220,18 +1227,32 @@ def denss_multiple(scattering_data, scattering_length_densities, dmax, avg_steps
                     write_xplor(rhoprime/dV, side, fprefix+"_current.xplor")
                 write_mrc(rhoprime/dV, side, fprefix+"_current.mrc")
             rg_array[k][j] = rho2rg(rhoprime,r=r,support=support[k],dx=dx)
-            rhoprime += sld[k]
+            
 
             #Error Reduction
             rho_array[k][support[k]] = rhoprime[support[k]]
             rho_array[k][~support[k]] = 0.0
 
             #enforce positivity by making all negative density points zero.
-            if positivity[k]:
+            if positivity[k] and not negativity and j > 0:
                 netmp = np.sum(rho_array[k])
                 rho_array[k][rho_array[k]<0] = 0.0
                 if np.sum(rho_array[k]) != 0:
                     rho_array[k] *= netmp / np.sum(rho_array[k])
+
+            #enforce negativity by making all positive density points zero
+            if negativity[k] and not positivity[k] and j > 0:
+                netmp = np.sum(rho_array[k])
+                rho_array[k][rho_array[k]>0] = 0.0
+                if np.sum(rho_array[k]) != 0:
+                    rho_array[k] *= netmp / np.sum(rho_array[k])
+
+            #enforce both negatity and positivity
+            if negativity[k] and positivity[k]:
+                #nothing is the right thing to do if we scale the data each time
+                pass
+
+            rho_array[k] += bsld[k] ## add the scattering length density back (minimum)
 
             if flatten_low_density[k]:
                 rho_array[k][np.abs(rho_array[k])<0.01*dV] = 0
@@ -1248,6 +1269,17 @@ def denss_multiple(scattering_data, scattering_length_densities, dmax, avg_steps
                 rho_array[k][rho_array[k]>rho_max[k]] = rho_max[k]
                 if np.sum(rho_array[k]) != 0:
                     rho_array[k] *= netmp / np.sum(rho_array[k])
+
+            ## Scale array within the constraints of the scattering length densities (min and max)
+            if tsld is not None:
+                arr_min = np.min(rho_array[k])
+                arr_difference = np.max(rho_array[k]) - arr_min
+                if arr_difference == 0:
+                    arr_difference = arr_min*0.05 #difference range is 10% the given SLD
+                sld_scale_factor = diff_sld[k]/arr_difference
+                intercept = min_sld[k] - sld_scale_factor * arr_min
+                rho_array[k] = rho_array[k] * sld_scale_factor + intercept #y = mx + b linear transformation
+
 
             #apply non-crystallographic symmetry averaging
             if ncs[k] != 0 and j in ncs_steps[k]:
@@ -1378,7 +1410,7 @@ def denss_multiple(scattering_data, scattering_length_densities, dmax, avg_steps
     ## Have to average all of the densities together one more time for the final reconstruction - JAS
     temp_rho_array = []
     for k in range(len(scattering_data)):    
-        F = np.fft.fftn(rho_array[k] - sld[k])
+        F = np.fft.fftn(rho_array[k] - bsld[k])
         #calculate spherical average intensity from 3D Fs
         Imean_array[k][j+1] = ndimage.mean(np.abs(F)**2, labels=qbin_labels, index=np.arange(0,qbin_labels.max()+1))
         #chi[j+1] = np.sum(((Imean[j+1,qbin_args]-Idata)/sigqdata)**2)/qbin_args.size
@@ -1389,7 +1421,7 @@ def denss_multiple(scattering_data, scattering_length_densities, dmax, avg_steps
         F *= factors[qbin_labels]
         rho = np.fft.ifftn(F,rho.shape)
         rho = rho.real
-        temp_rho_array.append(rho + sld[k])
+        temp_rho_array.append(rho + bsld[k])
 
     rho = np.average(temp_rho_array, axis = 0)
     #negative images yield the same scattering, so flip the image
