@@ -951,8 +951,8 @@ def denss(q, I, sigq, dmax, ne=None, voxel=5., oversampling=3., limit_dmax=False
 
     return qdata, Idata, sigqdata, qbinsc, Imean[j], chi, rg, supportV, rho, side
 
-def denss_multiple(scattering_data, bsld, dmax, tsld = None, avg_steps = 1, ne=None, voxel=5., 
-    average_weights = [], oversampling=3., limit_dmax=False,
+def denss_multiple(scattering_data, buffer_scattering_length_densities, target_scattering_length_densities, dmax, avg_steps = 1, 
+    ne=None, voxel=5., average_weights = [], oversampling=3., limit_dmax=False,
     limit_dmax_steps=[500], recenter=True, recenter_steps=None,
     recenter_mode="com", positivity=True, negativity=False, extrapolate=True, output="map",
     steps=None, seed=None,  minimum_density=None,  maximum_density=None,
@@ -979,6 +979,9 @@ def denss_multiple(scattering_data, bsld, dmax, tsld = None, avg_steps = 1, ne=N
             my_logger.info('Aborted!')
             return []
 
+    bsld = buffer_scattering_length_densities
+    tsld = target_scattering_length_densities
+    
     if len(bsld) != len(scattering_data) or len(tsld) != len(scattering_data):
         print("Scattering length densities do not line up with dataset\n"
             "Please make sure there is a scattering length density for each file\n"
@@ -1234,7 +1237,7 @@ def denss_multiple(scattering_data, bsld, dmax, tsld = None, avg_steps = 1, ne=N
             rho_array[k][~support[k]] = 0.0
 
             #enforce positivity by making all negative density points zero.
-            if positivity[k] and not negativity and j > 0:
+            if positivity[k] and not negativity[k] and j > 0:
                 netmp = np.sum(rho_array[k])
                 rho_array[k][rho_array[k]<0] = 0.0
                 if np.sum(rho_array[k]) != 0:

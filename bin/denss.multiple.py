@@ -84,6 +84,25 @@ if dmax <= 0:
 parser = argparse.ArgumentParser(description="DENSS: DENsity from Solution Scattering.\n A tool for calculating an electron density map from solution scattering data", formatter_class=argparse.RawTextHelpFormatter)
 args = dopts.parse_arguments(parser, gnomdmax=dmax)
 
+#only if there is a rho_start
+if args.rho_start != None:
+    args.rho_start, rho_side = saxs.read_mrc(args.rho_start)
+
+    rho_nsamples = args.rho_start.shape[0]
+    rho_voxel = rho_side/rho_nsamples
+
+    args.side = args.dmax*args.oversampling
+
+    if (not np.isclose(rho_side, args.side) or
+        not np.isclose(rho_voxel, args.voxel) or
+        not np.isclose(rho_nsamples, args.nsamples)):
+        print "rho_start density dimensions do not match given options."
+        print "Oversampling and voxel size adjusted to match rho_start dimensions."
+
+    args.voxel = rho_voxel
+    args.oversampling = rho_side/args.dmax
+    args.nsamples = rho_nsamples
+
 if __name__ == "__main__":
     my_logger = logging.getLogger()
     my_logger.setLevel(logging.DEBUG)
@@ -112,8 +131,8 @@ if __name__ == "__main__":
     if args.filemultiple != None and len(scattering_data) > 0:
         qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side = saxs.denss_multiple(
             scattering_data = scattering_data,
-            bsld = args.buffer_scattering_length_densities,
-            tsld = args.target_scattering_length_densities,
+            buffer_scattering_length_densities = args.buffer_scattering_length_densities,
+            target_scattering_length_densities = args.target_scattering_length_densities,
             dmax=args.dmax,
             avg_steps = args.avg_steps,
             average_weights = args.average_weights,
@@ -127,6 +146,7 @@ if __name__ == "__main__":
             recenter_mode=args.recenter_mode,
             positivity=args.positivity,
             negativity = args.negativity,
+            rho_start = args.rho_start,
             flatten_low_density=args.flatten_low_density,
             minimum_density=args.minimum_density,
             maximum_density=args.maximum_density,
