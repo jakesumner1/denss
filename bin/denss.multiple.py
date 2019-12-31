@@ -135,6 +135,7 @@ if __name__ == "__main__":
             target_scattering_length_densities = args.target_scattering_length_densities,
             dmax=args.dmax,
             avg_steps = args.avg_steps,
+            sld_steps = args.sld_scaling_steps,
             average_weights = args.average_weights,
             ne=args.ne,
             voxel=args.voxel,

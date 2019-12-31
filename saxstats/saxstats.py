@@ -952,7 +952,7 @@ def denss(q, I, sigq, dmax, ne=None, voxel=5., oversampling=3., limit_dmax=False
     return qdata, Idata, sigqdata, qbinsc, Imean[j], chi, rg, supportV, rho, side
 
 def denss_multiple(scattering_data, buffer_scattering_length_densities, target_scattering_length_densities, dmax, avg_steps = 1, 
-    ne=None, voxel=5., average_weights = [], oversampling=3., limit_dmax=False,
+    sld_steps=None, ne=None, voxel=5., average_weights = [], oversampling=3., limit_dmax=False,
     limit_dmax_steps=[500], recenter=True, recenter_steps=None,
     recenter_mode="com", positivity=True, negativity=False, extrapolate=True, output="map",
     steps=None, seed=None,  minimum_density=None,  maximum_density=None,
@@ -1274,15 +1274,16 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
                     rho_array[k] *= netmp / np.sum(rho_array[k])
 
             ## Scale array within the constraints of the scattering length densities (min and max)
-            if tsld is not None:
-                arr_min = np.min(rho_array[k])
-                arr_difference = np.max(rho_array[k]) - arr_min
-                if arr_difference == 0:
-                    arr_difference = arr_min*0.05 #difference range is 10% the given SLD
-                sld_scale_factor = diff_sld[k]/arr_difference
-                intercept = min_sld[k] - sld_scale_factor * arr_min
-                rho_array[k] = rho_array[k] * sld_scale_factor + intercept #y = mx + b linear transformation
-
+            if j+1 in sld_steps: #only scale when step is in sld_steps
+                if tsld is not None:
+                    arr_min = np.min(rho_array[k])
+                    arr_difference = np.max(rho_array[k]) - arr_min
+                    if arr_difference == 0:
+                        arr_difference = arr_min*0.05 #difference range is 10% the given SLD
+                    sld_scale_factor = diff_sld[k]/arr_difference
+                    intercept = min_sld[k] - sld_scale_factor * arr_min
+                    rho_array[k] = rho_array[k] * sld_scale_factor + intercept #y = mx + b linear transformation
+                temp_stop = 0 #only used as a break for debugging
 
             #apply non-crystallographic symmetry averaging
             if ncs[k] != 0 and j in ncs_steps[k]:

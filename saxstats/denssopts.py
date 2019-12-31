@@ -48,6 +48,7 @@ def parse_arguments(parser,gnomdmax=None):
     parser.add_argument("-avg_steps", "--avg_steps", default = 1, type=int, help="Number of steps before all Neutron Contrast data is averaged together. Only applies to -fm or --filemultiple")
     parser.add_argument("-bsld", "--buffer_scattering_length_densities", default = None, nargs="+", type=float, help="Input buffer scattering length densities that correspond to files entered with -fm. Add spaces between each number." )
     parser.add_argument("-tsld", "--target_scattering_length_densities", default = None, nargs="+", type=float, help="Input target scattering length densities that correspond to files entered with -fm. Add spaces between each number." )
+    parser.add_argument("-sld_steps", "--sld_scaling_steps", default=[3000,5000,7000,9000], type=int, nargs='+', help="Steps where the data will be scaled to fit within the given scattering length density range provided in -bsld and -tsld")
     parser.add_argument("-avg_w", "--average_weights", default = None, nargs="+", type=float, help="Argument where you can input the weights used for density averaging parallel to the --filemultiple input.")
     parser.add_argument("-u", "--units", default="a", type=str, help="Angular units (\"a\" [1/angstrom] or \"nm\" [1/nanometer]; default=\"a\")")
     parser.add_argument("-d", "--dmax", default=None, type=float, help="Estimated maximum dimension")
