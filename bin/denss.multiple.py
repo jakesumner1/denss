@@ -178,13 +178,23 @@ if __name__ == "__main__":
 
     print args.output
 
-    if args.filemultiple == None:
+    qdata_copy = np.copy(qdata)
+    Idata_copy = np.copy(Idata)
+    sigqdata_copy = np.copy(sigqdata)
+    Imean_copy = np.copy(Imean)
+
+    for k in range(len(qdata)):
+        I, q, sigq = scattering_data[k]
+        qdata = qdata_copy[k]
+        Idata = Idata_copy[k]
+        sigqdata = sigqdata_copy[k]
+        Imean = Imean_copy[k]
         fit = np.zeros(( len(qbinsc),5 ))
-        fit[:len(qdata),0] = qdata
-        fit[:len(Idata),1] = Idata
-        fit[:len(sigqdata),2] = sigqdata
-        fit[:len(qbinsc),3] = qbinsc
-        fit[:len(Imean),4] = Imean
+        fit[:len(list(qdata)),0] = qdata
+        fit[:len(list(Idata)),1] = Idata
+        fit[:len(list(sigqdata)),2] = sigqdata
+        fit[:len(list(qbinsc)),3] = qbinsc
+        fit[:len(list(Imean)),4] = Imean
         # np.savetxt(args.output+'_map.fit',fit,delimiter=' ',fmt='%.5e', header='q(data),I(data),error(data),q(density),I(density)')
         # np.savetxt(args.output+'_stats_by_step.dat',np.vstack((chis, rg, supportV)).T,delimiter=" ",fmt="%.5e",header='Chi2 Rg SupportVolume')
 
@@ -225,22 +235,22 @@ if __name__ == "__main__":
             ax1.set_xlabel(r'q ($\mathrm{\AA^{-1}}$)')
             #plt.setp(ax0.get_xticklabels(), visible=False)
             plt.tight_layout()
-            plt.savefig(args.output+'_fit.png',dpi=150)
+            plt.savefig(args.output+"_"+str(k)+'_fit.png',dpi=150)
             plt.close()
 
-            plt.plot(chis[chis>0])
+            plt.plot(chis[k][chis[k]>0])
             plt.xlabel('Step')
             plt.ylabel('$\chi^2$')
             plt.semilogy()
             plt.tight_layout()
-            plt.savefig(args.output+'_chis.png',dpi=150)
+            plt.savefig(args.output+"_"+str(k)+'_chis.png',dpi=150)
             plt.close()
 
-            plt.plot(rg[rg!=0])
+            plt.plot(rg[k][rg[k]!=0])
             plt.xlabel('Step')
             plt.ylabel('Rg')
             plt.tight_layout()
-            plt.savefig(args.output+'_rgs.png',dpi=150)
+            plt.savefig(args.output+"_"+str(k)+'_rgs.png',dpi=150)
             plt.close()
 
             plt.plot(supportV[supportV>0])
@@ -248,7 +258,7 @@ if __name__ == "__main__":
             plt.ylabel('Support Volume ($\mathrm{\AA^{3}}$)')
             plt.semilogy()
             plt.tight_layout()
-            plt.savefig(args.output+'_supportV.png',dpi=150)
+            plt.savefig(args.output+"_"+str(k)+'_supportV.png',dpi=150)
             plt.close()
 
     logging.info('END')

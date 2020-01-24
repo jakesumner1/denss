@@ -1243,13 +1243,6 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
                 if np.sum(rho_array[k]) != 0:
                     rho_array[k] *= netmp / np.sum(rho_array[k])
 
-            #enforce negativity by making all positive density points zero
-            if negativity[k] and not positivity[k] and j > 0:
-                netmp = np.sum(rho_array[k])
-                rho_array[k][rho_array[k]>0] = 0.0
-                if np.sum(rho_array[k]) != 0:
-                    rho_array[k] *= netmp / np.sum(rho_array[k])
-
             #enforce both negatity and positivity
             if negativity[k] and positivity[k]:
                 #nothing is the right thing to do if we scale the data each time
@@ -1283,6 +1276,11 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
                     sld_scale_factor = diff_sld[k]/arr_difference
                     intercept = min_sld[k] - sld_scale_factor * arr_min
                     rho_array[k] = rho_array[k] * sld_scale_factor + intercept #y = mx + b linear transformation
+                    if negativity[k] and not positivity[k] and j > 0:
+                        netmp = np.sum(rho_array[k])
+                        rho_array[k][rho_array[k]>0] = 0.0
+                        if np.sum(rho_array[k]) != 0:
+                            rho_array[k] *= netmp / np.sum(rho_array[k])
                 temp_stop = 0 #only used as a break for debugging
 
             #apply non-crystallographic symmetry averaging
@@ -1514,7 +1512,7 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
         scattering_data[k][0] /= scale_factor_array[k] #I
         scattering_data[k][2] /= scale_factor_array[k] #sigq
 
-    return qdata_array, Idata_array, sigq_data_array, qbinsc, Imean_array, chi_array, rg_array, supportV, rho, side
+    return qdata_array, Idata_array, sigq_data_array, qbinsc, Imean_array[:,j], chi_array, rg_array, supportV, rho, side
 
 def center_rho_roll(rho):
     """Move electron density map so its center of mass aligns with the center of the grid"""
