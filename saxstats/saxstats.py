@@ -952,7 +952,7 @@ def denss(q, I, sigq, dmax, ne=None, voxel=5., oversampling=3., limit_dmax=False
     return qdata, Idata, sigqdata, qbinsc, Imean[j], chi, rg, supportV, rho, side
 
 def denss_multiple(scattering_data, buffer_scattering_length_densities, target_scattering_length_densities, dmax, avg_steps = 1, 
-    sld_steps=None, ne=None, voxel=5., average_weights = [], oversampling=3., limit_dmax=False,
+    sld_scaling_steps=None, ne=None, voxel=5., average_weights = [], oversampling=3., limit_dmax=False,
     limit_dmax_steps=[500], recenter=True, recenter_steps=None,
     recenter_mode="com", positivity=True, negativity=False, extrapolate=True, output="map",
     steps=None, seed=None,  minimum_density=None,  maximum_density=None,
@@ -981,6 +981,7 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
 
     bsld = buffer_scattering_length_densities
     tsld = target_scattering_length_densities
+    sld_steps = sld_scaling_steps
     
     if len(bsld) != len(scattering_data) or len(tsld) != len(scattering_data):
         print("Scattering length densities do not line up with dataset\n"
@@ -1243,10 +1244,12 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
                 if np.sum(rho_array[k]) != 0:
                     rho_array[k] *= netmp / np.sum(rho_array[k])
 
-            #enforce both negatity and positivity
-            if negativity[k] and positivity[k]:
-                #nothing is the right thing to do if we scale the data each time
-                pass
+            if positivity[k] and negativity[k] and j > 0 and j < shrinkwrap_minstep[k] + 500:
+                # enforces positivity until the shrinkwrap has kicked in for 500 steps or so
+                netmp = np.sum(rho_array[k])
+                rho_array[k][rho_array[k]<0] = 0.0
+                if np.sum(rho_array[k]) != 0:
+                    rho_array[k] *= netmp / np.sum(rho_array[k])
 
             rho_array[k] += bsld[k] ## add the scattering length density back (minimum)
 
