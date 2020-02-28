@@ -44,6 +44,10 @@ parser.add_argument("-s", "--side", default=None, type=float, help="Desired leng
 parser.add_argument("-t","--threshold", default=None, type=float, help="Minimum density threshold (given as e-/A^3; sets lesser values to zero).")
 parser.add_argument("-ne","--ne", default=None, type=float, help="Desired number of electrons in map.")
 parser.add_argument("-o", "--output", default=None, help="Output filename prefix")
+parser.add_argument("-nscale", "--neutron_scaling", default=False, type=bool, help="Boolean indicating whether neutron SLD scaling will occur")
+parser.add_argument("-nscale_support", "--neutron_scaling_support", default=None, help="Support for given .mrc file in -f")
+parser.add_argument("-nscale_max", "--neutron_scaling_max", default=None, type=float, help="Max neutron SLD for the given system to be scaled by")
+parser.add_argument("-nscale_min", "--neutron_scaling_min", default=None, type=float, help="Min neutron SLD for the given system to be scaled by")
 args = parser.parse_args()
 
 if __name__ == "__main__":
@@ -109,6 +113,15 @@ if __name__ == "__main__":
 
     rho *= ne/np.sum(rho) #rescale to the total number of electrons
     rho /= vx*vy*vz #now divide by total volume to convert to electron density
+
+    if args.neutron_scaling:
+        if args.neutron_scaling_support==None or args.neutron_scaling_max==None or args.neutron_scaling_min==None:
+            print "One or more of the required parameters for neutron scaling is not entered."
+            print "---------------SCALING ABORTED-----------------"
+        else:
+            support = saxs.read_mrc(args.neutron_scaling_support)[0]
+            support = np.array(support, dtype=bool)
+            saxs.neutron_sld_scaling(rho, support, args.neutron_scaling_max, args.neutron_scaling_min)
 
     print rho.sum()*vx*vy*vz
 
