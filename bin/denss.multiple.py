@@ -103,6 +103,10 @@ if args.rho_start != None:
     args.oversampling = rho_side/args.dmax
     args.nsamples = rho_nsamples
 
+    #adds noise to reference mrc if specified
+    if args.noisy:
+        saxs.add_noise_to_grid(args.rho_start, args.reference_percent_noise)
+
 if __name__ == "__main__":
     my_logger = logging.getLogger()
     my_logger.setLevel(logging.DEBUG)
@@ -129,7 +133,7 @@ if __name__ == "__main__":
 
     ## Runs denss_multiple if there are multiple file inputs
     if args.filemultiple != None and len(scattering_data) > 0:
-        qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side = saxs.denss_multiple(
+        qdata, Idata, sigqdata, qbinsc, Imean, chis, rg, supportV, rho, side, chi_all_array, chi_break_cond = saxs.denss_multiple(
             scattering_data = scattering_data,
             buffer_scattering_length_densities = args.buffer_scattering_length_densities,
             target_scattering_length_densities = args.target_scattering_length_densities,
@@ -137,6 +141,7 @@ if __name__ == "__main__":
             avg_steps = args.avg_steps,
             sld_scaling_steps = args.sld_scaling_steps,
             average_weights = args.average_weights,
+            contrast_boosting_start = args.contrast_boosting_start,
             ne=args.ne,
             voxel=args.voxel,
             oversampling=args.oversampling,
@@ -178,6 +183,7 @@ if __name__ == "__main__":
 
     print args.output
 
+    chi_all_array = np.array(chi_all_array)
     qdata_copy = np.copy(qdata)
     Idata_copy = np.copy(Idata)
     sigqdata_copy = np.copy(sigqdata)
@@ -246,6 +252,7 @@ if __name__ == "__main__":
             plt.savefig(args.output+"_"+str(k)+'_chis.png',dpi=150)
             plt.close()
 
+
             plt.plot(rg[k][rg[k]!=0])
             plt.xlabel('Step')
             plt.ylabel('Rg')
@@ -260,6 +267,14 @@ if __name__ == "__main__":
             plt.tight_layout()
             plt.savefig(args.output+"_"+str(k)+'_supportV.png',dpi=150)
             plt.close()
+
+    plt.plot(chi_all_array[chi_all_array>0], 'b', chi_break_cond, 'r')
+    plt.xlabel('Step')
+    plt.ylabel('$\chi^2$ End Fraction')
+    plt.semilogy()
+    plt.tight_layout()
+    plt.savefig(args.output+"_"+str(k)+'_chi_end_fraction.png',dpi=150)
+    plt.close()
 
     logging.info('END')
 

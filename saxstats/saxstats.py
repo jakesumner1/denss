@@ -66,6 +66,23 @@ def center_rho(rho, centering="com", return_shift=False):
     else:
         return rho
 
+def add_noise_to_grid(rho, percent_noise):
+    '''
+    Add noise to a given .mrc density file randomly.
+    Percent of .mrc file to add noise to given by
+    parameter 'percent_noise'. Note: the .mrc file
+    should be read into the program before adding noise
+    with this function.
+    '''
+    n = len(rho)
+    rand_mask = np.random.rand(n,n,n)
+    bool_mask = np.array([True if rand_mask[i[0], i[1], i[2]] < percent_noise else False for i,x in np.ndenumerate(rand_mask)])
+    bool_mask = bool_mask.reshape(rho.shape)
+    noise_array = np.random.rand(n,n,n)**2/np.random.rand(n,n,n)**2
+    rho[bool_mask] *= noise_array[bool_mask]
+    return
+
+
 def rho2rg(rho,side=None,r=None,support=None,dx=None):
     """Calculate radius of gyration from an electron density map."""
     if side is None and r is None:
@@ -951,8 +968,28 @@ def denss(q, I, sigq, dmax, ne=None, voxel=5., oversampling=3., limit_dmax=False
 
     return qdata, Idata, sigqdata, qbinsc, Imean[j], chi, rg, supportV, rho, side
 
-def denss_multiple(scattering_data, buffer_scattering_length_densities, target_scattering_length_densities, dmax, avg_steps = 1, 
-    sld_scaling_steps=None, ne=None, voxel=5., average_weights = [], oversampling=3., limit_dmax=False,
+def neutron_sld_scaling(rho, support, sld_max, sld_min):
+    '''
+    This function will linearly scale the rho according
+    to the given sld_max and sld_min arguments, which are
+    the scalar minimum and maximum values for the neutron
+    scattering length densities of the components in a 
+    multi-component system. 
+    '''
+    arr_min = np.min(rho[support])
+    arr_difference = np.max(rho[support]) - arr_min
+    if arr_difference == 0:
+        arr_difference = arr_min*0.05 #difference range is 10% the given SLD
+    sld_scale_factor = (sld_max-sld_min)/arr_difference
+    intercept = sld_min - sld_scale_factor * arr_min
+    rho[support] = rho[support] * sld_scale_factor + intercept #y = mx + b linear transformation
+    return rho
+
+
+def denss_multiple(scattering_data, buffer_scattering_length_densities, 
+    target_scattering_length_densities, dmax, avg_steps = 1, 
+    sld_scaling_steps=None, ne=None, voxel=5., average_weights = [], 
+    contrast_boosting_start = None, oversampling=3., limit_dmax=False,
     limit_dmax_steps=[500], recenter=True, recenter_steps=None,
     recenter_mode="com", positivity=True, negativity=False, extrapolate=True, output="map",
     steps=None, seed=None,  minimum_density=None,  maximum_density=None,
@@ -972,8 +1009,6 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
     scattering_data is an numpy array in the format [[I,q,sigq], [I,q,sigq], ...] for however many
     scattering curves you have
     """
-
-    """Calculate electron density from scattering data."""
     if abort_event is not None:
         if abort_event.is_set():
             my_logger.info('Aborted!')
@@ -1180,9 +1215,21 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
             print("\n Step     Chi2     Rg    Support Volume")
             print(" ----- --------- ------- --------------")
 
-    ## Initialize rho_array out here because it will carry over between steps now ~JAS
-    rho_array = np.array([rho]*len(scattering_data))
 
+    
+    cboost_step = 20
+    cboost_max = 8500
+    contrat_boosting_array = []
+    if contrast_boosting_start != None:
+        contrat_boosting_array = [i for i in range(contrast_boosting_start, cboost_max, cboost_step)]
+
+    ## Initialize rho_array out here because it will carry over between steps now ~JAS
+    if rho_start is None:
+        rho_array = np.array([rho]*len(scattering_data))
+    elif rho_start is not None:
+        rho_array = np.array([rho_start]*len(scattering_data))
+    chi_all_array = []
+    chi_break_cond = []
     for j in range(steps):
         if abort_event is not None:
             if abort_event.is_set():
@@ -1190,13 +1237,18 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
                 return []
         F_array = np.zeros((len(scattering_data), x_.size, x_.size, x_.size), dtype = complex) #has the structure factors for each scattering profile
         
-        ## Averaging the densities of contrast data together after a set number of steps
+        ## Averaging the densities of contrast data together after a set number of steps ~JAS
         if (j-1)%avg_steps == 0 and j > 0:  #one after the step
             rho_avg = np.average(rho_array, axis = 0, weights = average_weights) #averages all of the rhos together
             for k in range(len(rho_array)):
                 rho_array[k] = rho_avg
+            if j%write_freq == 0:
+                if write_xplor_format:
+                    write_xplor(rho_avg/dV, side, fprefix+"_current.xplor")
+                write_mrc(rho_avg/dV, side, fprefix+"_current.mrc")
 
-        ## Separate for loop to get the updated densities for each scattering profile ~JAS
+
+        ## Accumulate F arrays before scaling
         for k in range(len(scattering_data)):
             # k = scattering profile index ~JAS
             # j = step ~JAS
@@ -1212,11 +1264,27 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
                 np.savetxt(fprefix+'_step0_saxs.dat',np.vstack((qbinsc,Imean[j],Imean[j]*.05)).T,delimiter=" ",fmt="%.5e")
                 write_mrc(rho,side,fprefix+"_step"+str(j)+".mrc")
             """
-
-            #scale F to match data
             factors = np.ones((len(qbins)))
             factors[qbin_args_array[k]] = np.sqrt(Idata_array[k]/Imean_array[k][j,qbin_args_array[k]])
             F_array[k] *= factors[qbin_labels]
+
+        ## Contrast Boosting method ~JAS - Need at least 2 contrasts to do contrast boosting
+        if j>0 and len(F_array) > 1 and j in contrat_boosting_array:
+            for l in range(len(F_array)):
+                sigma_contrast = np.zeros_like(F_array[l])
+                for m in range(len(F_array)):
+                    if l != m: #as long as it's not that contast
+                        sigma_contrast += F_array[l] - F_array[m] #gets sigma value for contrast
+                sigma_contrast[sigma_contrast<0] = 0.0
+                temp_F_prime = sigma_contrast + F_array[l]
+                sum_temp_F_prime, sum_curr_F = (np.sum(temp_F_prime), np.sum(F_array[l]))
+                if sum_temp_F_prime != sum_curr_F:
+                    temp_F_prime *= (sum_curr_F/sum_temp_F_prime) #rho'' multiplied by alpha
+                F_array[l] = temp_F_prime
+
+        for k in range(len(scattering_data)):
+            #scale F to match data
+            
             try:
                 interp = interpolate.interp1d(qbinsc, Imean_array[k][j], kind='cubic',fill_value="extrapolate")
                 I4chi = interp(scattering_data[k][1]) #interp(q)
@@ -1226,10 +1294,7 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
             #APPLY REAL SPACE RESTRAINTS
             rhoprime = np.fft.ifftn(F_array[k],rho_array[k].shape)
             rhoprime = rhoprime.real
-            if j%write_freq == 0:
-                if write_xplor_format:
-                    write_xplor(rhoprime/dV, side, fprefix+"_current.xplor")
-                write_mrc(rhoprime/dV, side, fprefix+"_current.mrc")
+            
             rg_array[k][j] = rho2rg(rhoprime,r=r,support=support[k],dx=dx)
             
 
@@ -1391,14 +1456,18 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
         if j > 100:
             for k in range(len(scattering_data)):
                 chi_last.append(np.std(chi_array[k][j-100:j]))
+                chi_break_val = chi_end_fraction * np.mean(np.array([np.median(chi_array[k][j-100:j]) for k in range(len(scattering_data))]))
         else:
-            chi_last = [100000] ## number larger than the chi_end_fraction
+            chi_last = [100] ## number larger than the chi_end_fraction
+            chi_break_val = 100
         chi_last = np.array(chi_last)
         chi_avg_all = np.mean(chi_last)
-
+        chi_all_array.append(chi_avg_all)
         ## Gets average chi/rg for this current run -> simpler for the output in the logging
         chi_avg_curr = np.mean(np.array([float(chi_array[k][j]) for k in range(len(scattering_data))]))
         rg_avg_curr = np.mean(np.array([float(rg_array[k][j]) for k in range(len(scattering_data))]))
+
+        chi_break_cond.append(chi_break_val)
 
         if not quiet:
             if gui:
@@ -1407,7 +1476,7 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
                 sys.stdout.write("\r% 5i % 4.2e % 3.2f       % 5i          " % (j, chi_avg_curr, rg_avg_curr, supportV[0][j]))
                 sys.stdout.flush()
 
-        if j > 101 + np.max(shrinkwrap_minstep) and chi_avg_all < chi_end_fraction * np.mean(np.array([np.median(chi_array[k][j-100:j]) for k in range(len(scattering_data))])):
+        if j > 101 + np.max(shrinkwrap_minstep) and chi_avg_all < chi_break_val:
             break
 
         #rho = newrho - no longer needed
@@ -1515,7 +1584,7 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities, target_s
         scattering_data[k][0] /= scale_factor_array[k] #I
         scattering_data[k][2] /= scale_factor_array[k] #sigq
 
-    return qdata_array, Idata_array, sigq_data_array, qbinsc, Imean_array[:,j], chi_array, rg_array, supportV, rho, side
+    return qdata_array, Idata_array, sigq_data_array, qbinsc, Imean_array[:,j], chi_array, rg_array, supportV, rho, side, chi_all_array, chi_break_cond
 
 def center_rho_roll(rho):
     """Move electron density map so its center of mass aligns with the center of the grid"""

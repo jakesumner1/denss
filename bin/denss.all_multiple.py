@@ -95,7 +95,7 @@ parser.add_argument("-nm", "--nmaps",default = 20,type =int, help="Number of map
 parser.add_argument("-j", "--cores", type=int, default = 1, help="Number of cores used for parallel processing. (default: 1)")
 parser.add_argument("-en_on", "--enantiomer_on", action = "store_true", dest="enan", help="Generate and select best enantiomers (default). ")
 parser.add_argument("-en_off", "--enantiomer_off", action = "store_false", dest="enan", help="Do not generate and select best enantiomers.")
-parser.add_argument("-ref", "--ref", default=None, type=str, help="Input reference model (.mrc or .pdb file, optional).")
+parser.add_argument("-ref", "--ref", default=None, type=str, nargs="+", help="Input reference model (.mrc or .pdb file, optional).")
 parser.add_argument("-c_on", "--center_on", dest="center", action="store_true", help="Center reference PDB map.")
 parser.add_argument("-c_off", "--center_off", dest="center", action="store_false", help="Do not center reference PDB map (default).")
 parser.add_argument("-r", "--resolution", default=15.0, type=float, help="Resolution of map calculated from reference PDB file (default 15 angstroms).")
@@ -107,7 +107,7 @@ args = copy.copy(superargs)
 del args.units
 del args.cores
 del args.enan
-del args.ref
+#del args.ref
 del args.nmaps
 del args.file
 del args.plot

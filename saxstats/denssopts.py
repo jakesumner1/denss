@@ -50,6 +50,9 @@ def parse_arguments(parser,gnomdmax=None):
     parser.add_argument("-tsld", "--target_scattering_length_densities", default = None, nargs="+", type=float, help="Input target scattering length densities that correspond to files entered with -fm. Add spaces between each number." )
     parser.add_argument("-sld_steps", "--sld_scaling_steps", default=[3000,5000,7000,9000], type=int, nargs='+', help="Steps where the data will be scaled to fit within the given scattering length density range provided in -bsld and -tsld")
     parser.add_argument("-avg_w", "--average_weights", default = None, nargs="+", type=float, help="Argument where you can input the weights used for density averaging parallel to the --filemultiple input.")
+    parser.add_argument("-cboost_start", "--contrast_boosting_start", default = None, type=int, help="Add a step number when the contrast boosting begins for your DENSS Multiple reconstruction.")
+    parser.add_argument("-pct_noise", "--reference_percent_noise", default = 0.1, type=float, help="Percent of values in the reference .mrc file to be altered randomly")
+    parser.add_argument("-noise_on", "--noise_on", dest="noisy", action="store_true", help="Turns on the feature to add noise to a given reference .mrc file")
     parser.add_argument("-u", "--units", default="a", type=str, help="Angular units (\"a\" [1/angstrom] or \"nm\" [1/nanometer]; default=\"a\")")
     parser.add_argument("-d", "--dmax", default=None, type=float, help="Estimated maximum dimension")
     parser.add_argument("-v", "--voxel", default=None, type=float, help="Set desired voxel size, setting resolution of map")
@@ -112,6 +115,7 @@ def parse_arguments(parser,gnomdmax=None):
     parser.set_defaults(cutout=False)
     parser.set_defaults(quiet = False)
     parser.set_defaults(force_run = False)
+    parser.set_defaults(noisy = False)
     if matplotlib_found:
         parser.set_defaults(plot=True)
     else:
