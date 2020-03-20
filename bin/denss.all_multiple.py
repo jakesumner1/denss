@@ -107,7 +107,7 @@ args = copy.copy(superargs)
 del args.units
 del args.cores
 del args.enan
-#del args.ref
+del args.ref
 del args.nmaps
 del args.file
 del args.plot
@@ -118,6 +118,8 @@ del args.center
 del args.force_run
 del args.parameter_file
 del args.filemultiple
+del args.reference_percent_noise
+del args.noisy
 
 def multi_denss(niter, **kwargs):
     try:

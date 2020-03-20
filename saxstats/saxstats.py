@@ -1273,7 +1273,7 @@ def denss_multiple(scattering_data, buffer_scattering_length_densities,
             for l in range(len(F_array)):
                 sigma_contrast = np.zeros_like(F_array[l])
                 for m in range(len(F_array)):
-                    if l != m: #as long as it's not that contast
+                    if l != m: #as long as it's not that contrast
                         sigma_contrast += F_array[l] - F_array[m] #gets sigma value for contrast
                 sigma_contrast[sigma_contrast<0] = 0.0
                 temp_F_prime = sigma_contrast + F_array[l]
