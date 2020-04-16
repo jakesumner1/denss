@@ -956,6 +956,588 @@ def denss(q, I, sigq, dmax, ne=None, voxel=5., oversampling=3., limit_dmax=False
 
     return qdata, Idata, sigqdata, qbinsc, Imean[j], chi, rg, supportV, rho, side
 
+def add_noise_to_grid(rho, percent_noise):
+    '''
+    Add noise to a given .mrc density file randomly.
+    Percent of .mrc file to add noise to given by
+    parameter 'percent_noise'. Note: the .mrc file
+    should be read into the program before adding noise
+    with this function.
+    '''
+    n = len(rho)
+    rand_mask = np.random.rand(n,n,n)
+    bool_mask = np.array([True if rand_mask[i[0], i[1], i[2]] < percent_noise else False for i,x in np.ndenumerate(rand_mask)])
+    bool_mask = bool_mask.reshape(rho.shape)
+    noise_array = np.random.rand(n,n,n)**2/np.random.rand(n,n,n)**2
+    rho[bool_mask] *= noise_array[bool_mask]
+    return
+
+def denss_multiple(scattering_data, buffer_scattering_length_densities, dmax, 
+    avg_steps = 1, sld_scaling_steps=None, ne=None, voxel=5., average_weights = [], 
+    contrast_boosting_start = None, oversampling=3., limit_dmax=False,
+    limit_dmax_steps=[500], recenter=True, recenter_steps=None,
+    recenter_mode="com", positivity=True, negativity=False, extrapolate=True, output="map",
+    steps=None, seed=None,  minimum_density=None,  maximum_density=None,
+    flatten_low_density=True, rho_start=None, shrinkwrap=True,
+    shrinkwrap_sigma_start=3, shrinkwrap_sigma_end=1.5,
+    shrinkwrap_sigma_decay=0.99, shrinkwrap_threshold_fraction=0.2,
+    shrinkwrap_iter=20, shrinkwrap_minstep=100, chi_end_fraction=0.01,
+    write_xplor_format=False, write_freq=100, enforce_connectivity=True,
+    enforce_connectivity_steps=[500], cutout=True, quiet=False, ncs=0,
+    ncs_steps=[500],ncs_axis=1, abort_event=None, my_logger=logging.getLogger(),
+    path='.', gui=False):
+    """
+    Calculate neutron scattering length density from multiple SANS contrasts
+    Only the first scattering profile (q_0, I_0, sigq_0, and dmax) is required to run, all others
+    are optional.
+    scattering_data is an numpy array in the format [[I,q,sigq], [I,q,sigq], ...] for however many
+    scattering curves you have
+    """
+    if abort_event is not None:
+        if abort_event.is_set():
+            my_logger.info('Aborted!')
+            return []
+
+    bsld = buffer_scattering_length_densities
+    
+    if len(bsld) != len(scattering_data):
+        print("Scattering length densities do not line up with dataset\n"
+            "Please make sure there is a scattering length density for each file\n"
+            "Specified in -fm - check both the target and buffer SLDs")
+        return []
+
+    fprefix = os.path.join(path, output)
+
+    D = dmax
+
+    my_logger.info('q range of input data: %3.3f < q < %3.3f', scattering_data[0][1].min(), scattering_data[0][1].max()) ##ADDRESS THE CHANGE TO Q IN LOGGER
+    my_logger.info('Maximum dimension: %3.3f', D)
+    my_logger.info('Sampling ratio: %3.3f', oversampling)
+    my_logger.info('Requested real space voxel size: %3.3f', voxel)
+    my_logger.info('Number of electrons: %3.3f', ne)
+    my_logger.info('Limit Dmax: %s', limit_dmax)
+    my_logger.info('Limit Dmax Steps: %s', limit_dmax_steps)
+    my_logger.info('Recenter: %s', recenter)
+    my_logger.info('Recenter Steps: %s', recenter_steps)
+    my_logger.info('Recenter Mode: %s', recenter_mode)
+    my_logger.info('NCS: %s', ncs)
+    my_logger.info('NCS Steps: %s', ncs_steps)
+    my_logger.info('NCS Axis: %s', ncs_axis)
+    my_logger.info('Positivity: %s', positivity)
+    my_logger.info('Minimum Density: %s', minimum_density)
+    my_logger.info('Maximum Density: %s', maximum_density)
+    my_logger.info('Extrapolate high q: %s', extrapolate)
+    my_logger.info('Shrinkwrap: %s', shrinkwrap)
+    my_logger.info('Shrinkwrap sigma start: %s', shrinkwrap_sigma_start)
+    my_logger.info('Shrinkwrap sigma end: %s', shrinkwrap_sigma_end)
+    my_logger.info('Shrinkwrap sigma decay: %s', shrinkwrap_sigma_decay)
+    my_logger.info('Shrinkwrap threshold fraction: %s', shrinkwrap_threshold_fraction)
+    my_logger.info('Shrinkwrap iterations: %s', shrinkwrap_iter)
+    my_logger.info('Shrinkwrap starting step: %s', shrinkwrap_minstep)
+    my_logger.info('Enforce connectivity: %s', enforce_connectivity)
+    my_logger.info('Enforce connectivity steps: %s', enforce_connectivity_steps)
+    my_logger.info('Chi2 end fraction: %3.3e', chi_end_fraction)
+
+    #Initialize variables
+
+    side = oversampling*D
+    halfside = side/2
+
+    n = int(side/voxel)
+    #want n to be even for speed/memory optimization with the FFT, ideally a power of 2, but wont enforce that
+    if n%2==1:
+        n += 1
+    #store n for later use if needed
+    nbox = n
+
+    dx = side/n
+    dV = dx**3
+    V = side**3
+    x_ = np.linspace(-halfside,halfside,n)
+    x,y,z = np.meshgrid(x_,x_,x_,indexing='ij')
+    r = np.sqrt(x**2 + y**2 + z**2)
+
+    df = 1/side
+    qx_ = np.fft.fftfreq(x_.size)*n*df*2*np.pi
+    qx, qy, qz = np.meshgrid(qx_,qx_,qx_,indexing='ij')
+    qr = np.sqrt(qx**2+qy**2+qz**2)
+    qmax = np.max(qr)
+    qstep = np.min(qr[qr>0])
+    nbins = int(qmax/qstep)
+    qbins = np.linspace(0,nbins*qstep,nbins+1)
+
+    #create modified qbins and put qbins in center of bin rather than at left edge of bin.
+    qbinsc = np.copy(qbins)
+    qbinsc[1:] += qstep/2.
+
+    #create an array labeling each voxel according to which qbin it belongs
+    qbin_labels = np.searchsorted(qbins,qr,"right")
+    qbin_labels -= 1
+
+    #allow for any range of q data
+    #scattering_data = [[I,q,sigq]...] index: I = 0; q = 1; sigq = 2
+    qdata_array = []
+    Idata_array = []
+    qbin_args_array = []
+    sigq_data_array = []
+    scale_factor_array = np.zeros(len(scattering_data), dtype = "float64") #array length = number of scattering profiles
+    for i in range(len(scattering_data)):
+        temp_qdata = qbinsc[np.where( (qbinsc>=scattering_data[i][1].min()) & (qbinsc<=scattering_data[i][1].max()) )]
+        temp_Idata = np.interp(temp_qdata,scattering_data[i][1],scattering_data[i][0])
+        if extrapolate:
+            qextend = qbinsc[qbinsc>=temp_qdata.max()]
+            Iextend = qextend**-4
+            Iextend = Iextend/Iextend[0] * temp_Idata[-1]
+            temp_qdata = np.concatenate((temp_qdata,qextend[1:]))
+            temp_Idata = np.concatenate((temp_Idata,Iextend[1:]))
+
+        #create list of qbin indices just in region of data for later F scaling
+        temp_qbin_args = np.in1d(qbinsc,temp_qdata,assume_unique=True)
+        temp_sigq_data = np.interp(temp_qdata,scattering_data[i][1],scattering_data[i][2])
+
+        scale_factor_array[i] = ne**2 / temp_Idata[0]
+        temp_Idata *= scale_factor_array[i]
+        temp_sigq_data *= scale_factor_array[i]
+        scattering_data[i][0] *= scale_factor_array[i]
+        scattering_data[i][2] *= scale_factor_array[i]
+
+        ## Append temporary arrays to list ##
+        qdata_array.append(temp_qdata)
+        Idata_array.append(temp_Idata)
+        qbin_args_array.append(temp_qbin_args)
+        sigq_data_array.append(temp_sigq_data)
+
+    ##Change them all into numpy arrays
+    sigq_data_array = np.array(sigq_data_array)
+    qdata_array = np.array(qdata_array)
+    Idata_array = np.array(Idata_array)
+    qbin_args_array = np.array(qbin_args_array)
+
+    if steps == 'None' or steps is None or steps < 1:
+        stepsarr = np.concatenate((np.max(enforce_connectivity_steps, axis = 0),[np.max(shrinkwrap_minstep)]))
+        maxec = np.max(stepsarr)
+        steps = int(np.max(shrinkwrap_iter) * (np.log(shrinkwrap_sigma_end/shrinkwrap_sigma_start)/np.log(shrinkwrap_sigma_decay)) + maxec)
+        #add enough steps for convergence after shrinkwrap is finished
+        #something like 7000 seems reasonable, likely will finish before that on its own
+        #then just make a round number when using defaults
+        steps += 7621
+    else:
+        steps = np.int(steps)
+
+    Imean_array = np.zeros((len(scattering_data), steps+1,len(qbins)))      #update for each scattering profile
+    chi_array = np.zeros((len(scattering_data), steps+1))                   #update for each scattering profile
+    rg_array = np.zeros((len(scattering_data), steps+1))                    #update for each scattering profile
+    supportV = np.zeros((steps+1))                                          #update for each scattering profile
+    supportV = np.array([supportV]*len(scattering_data))
+    support = np.ones(x.shape,dtype=bool)                                   #update for each scattering profile
+    support = np.array([support]*len(scattering_data))
+
+    if seed is None:
+        #Have to reset the random seed to get a random in different from other processes
+        prng = np.random.RandomState()
+        seed = prng.randint(2**31-1)
+    else:
+        seed = int(seed)
+
+    prng = np.random.RandomState(seed)
+
+    if rho_start is not None:
+        rho = rho_start
+    else:
+        rho = prng.random_sample(size=x.shape) #- 0.5
+
+    #in case it hasn't been initialized, all weights are equal to 1
+    if average_weights == []: 
+        average_weights = np.array([1.0]*len(scattering_data))
+    else:
+        average_weights = np.array(average_weights)
+
+    sigma = shrinkwrap_sigma_start
+    #convert density values to absolute number of electrons
+    #since FFT and rho given in electrons, not density, until converted at the end
+    rho_min = minimum_density
+    rho_max = maximum_density
+    for k in range(len(scattering_data)):
+        if rho_min[k] is not None:
+            rho_min[k] *= dV
+            #print rho_min
+        if rho_max[k] is not None:
+            rho_max[k]*= dV
+            #print rho_max
+
+    my_logger.info('Maximum number of steps: %i', steps)
+    my_logger.info('Grid size (voxels): %i x %i x %i', n, n, n)
+    my_logger.info('Real space box width (angstroms): %3.3f', side)
+    my_logger.info('Real space box range (angstroms): %3.3f < x < %3.3f', x_.min(), x_.max())
+    my_logger.info('Real space box volume (angstroms^3): %3.3f', V)
+    my_logger.info('Real space voxel size (angstroms): %3.3f', dx)
+    my_logger.info('Real space voxel volume (angstroms^3): %3.3f', dV)
+    my_logger.info('Reciprocal space box width (angstroms^(-1)): %3.3f', qx_.max()-qx_.min())
+    my_logger.info('Reciprocal space box range (angstroms^(-1)): %3.3f < qx < %3.3f', qx_.min(), qx_.max())
+    my_logger.info('Maximum q vector (diagonal) (angstroms^(-1)): %3.3f', qr.max())
+    my_logger.info('Number of q shells: %i', nbins)
+    my_logger.info('Width of q shells (angstroms^(-1)): %3.3f', qstep)
+    my_logger.info('Random seed: %i', seed)
+    if not quiet:
+        if gui:
+            my_logger.info("\n Step     Chi2     Rg    Support Volume")
+            my_logger.info(" ----- --------- ------- --------------")
+        else:
+            print("\n Step     Chi2     Rg    Support Volume")
+            print(" ----- --------- ------- --------------")
+
+    contrat_boosting_array = []
+    if contrast_boosting_start != None:
+        cboost_step = 20
+        cboost_max = 8500
+        contrat_boosting_array = [i for i in range(contrast_boosting_start, cboost_max, cboost_step)]
+
+    ## Initialize rho_array
+    if rho_start is None:
+        rho_array = np.array([rho]*len(scattering_data))
+    elif rho_start is not None:
+        rho_array = np.array([rho_start]*len(scattering_data))
+    chi_all_array = []
+    chi_break_cond = []
+    for j in range(steps):
+        if abort_event is not None:
+            if abort_event.is_set():
+                my_logger.info('Aborted!')
+                return []
+        F_array = np.zeros((len(scattering_data), x_.size, x_.size, x_.size), dtype = complex) #has the structure factors for each scattering profile
+        
+        ## Averaging the densities of contrast data together after a set number of steps ~JAS
+        if (j-1)%avg_steps == 0 and j > 0:  #one after the step
+            rho_avg = np.average(rho_array, axis = 0, weights = average_weights) #averages all of the rhos together
+            for k in range(len(rho_array)):
+                rho_array[k] = rho_avg
+            if j%write_freq == 0:
+                if write_xplor_format:
+                    write_xplor(rho_avg/dV, side, fprefix+"_current.xplor")
+                write_mrc(rho_avg/dV, side, fprefix+"_current.mrc")
+
+
+        ## Accumulate F arrays before scaling
+        for k in range(len(scattering_data)):
+            # k = scattering profile index ~JAS
+            # j = step ~JAS
+            # correct rho_array[k] by the corresponding sld each time
+            F_array[k] = np.fft.fftn(rho_array[k] - bsld[k])
+
+            #APPLY RECIPROCAL SPACE RESTRAINTS
+            #calculate spherical average of intensities from 3D Fs
+            I3D = np.abs(F_array[k])**2
+            Imean_array[k][j] = ndimage.mean(I3D, labels=qbin_labels, index=np.arange(0,qbin_labels.max()+1))
+            """
+            if j==0:
+                np.savetxt(fprefix+'_step0_saxs.dat',np.vstack((qbinsc,Imean[j],Imean[j]*.05)).T,delimiter=" ",fmt="%.5e")
+                write_mrc(rho,side,fprefix+"_step"+str(j)+".mrc")
+            """
+            factors = np.ones((len(qbins)))
+            factors[qbin_args_array[k]] = np.sqrt(Idata_array[k]/Imean_array[k][j,qbin_args_array[k]])
+            F_array[k] *= factors[qbin_labels]
+
+        ## Contrast Boosting method - Need at least 2 contrasts to do contrast boosting
+        if j>0 and len(F_array) > 1 and j in contrat_boosting_array:
+            for l in range(len(F_array)):
+                sigma_contrast = np.zeros_like(F_array[l])
+                for m in range(len(F_array)):
+                    if l != m: #as long as it's not that contrast
+                        sigma_contrast += F_array[l] - F_array[m] #gets sigma value for contrast
+                sigma_contrast[sigma_contrast<0] = 0.0
+                temp_F_prime = sigma_contrast + F_array[l]
+                sum_temp_F_prime, sum_curr_F = (np.sum(temp_F_prime), np.sum(F_array[l]))
+                if sum_temp_F_prime != sum_curr_F:
+                    temp_F_prime *= (sum_curr_F/sum_temp_F_prime) #rho'' multiplied by alpha
+                F_array[l] = temp_F_prime
+
+        for k in range(len(scattering_data)):
+            #scale F to match data
+            
+            try:
+                interp = interpolate.interp1d(qbinsc, Imean_array[k][j], kind='cubic',fill_value="extrapolate")
+                I4chi = interp(scattering_data[k][1]) #interp(q)
+                chi_array[k][j] = np.sum(((I4chi-scattering_data[k][0])/scattering_data[k][2])**2)/len(scattering_data[k][1]) #I=0; q=1; sigq=2 (index)
+            except:
+                chi_array[k][j] = np.sum(((Imean_array[k][j,qbin_args]-Idata_array[k])/sigq_data_array[k])**2)/qbin_args_array[k].size
+            #APPLY REAL SPACE RESTRAINTS
+            rhoprime = np.fft.ifftn(F_array[k],rho_array[k].shape)
+            rhoprime = rhoprime.real
+            
+            rg_array[k][j] = rho2rg(rhoprime,r=r,support=support[k],dx=dx)
+            
+
+            #Error Reduction
+            rho_array[k][support[k]] = rhoprime[support[k]]
+            rho_array[k][~support[k]] = 0.0
+
+            #enforce positivity by making all negative density points zero.
+            if positivity[k] and not negativity[k] and j > 0:
+                netmp = np.sum(rho_array[k])
+                rho_array[k][rho_array[k]<0] = 0.0
+                if np.sum(rho_array[k]) != 0:
+                    rho_array[k] *= netmp / np.sum(rho_array[k])
+
+            if positivity[k] and negativity[k] and j > 0 and j < shrinkwrap_minstep[k] + 500:
+                # enforces positivity until the shrinkwrap has kicked in for 500 steps or so
+                netmp = np.sum(rho_array[k])
+                rho_array[k][rho_array[k]<0] = 0.0
+                if np.sum(rho_array[k]) != 0:
+                    rho_array[k] *= netmp / np.sum(rho_array[k])
+
+            rho_array[k] += bsld[k] ## add the scattering length density back (minimum)
+
+            if flatten_low_density[k]:
+                rho_array[k][np.abs(rho_array[k])<0.01*dV] = 0
+
+            #allow further bounds on density, rather than just positivity
+            if rho_min[k] is not None:
+                netmp = np.sum(rho_array[k])
+                rho_array[k][rho_array[k]<rho_min[k]] = rho_min[k]
+                if np.sum(rho_array[k]) != 0:
+                    rho_array[k] *= netmp / np.sum(rho_array[k])
+
+            if rho_max[k] is not None:
+                netmp = np.sum(rho_array[k])
+                rho_array[k][rho_array[k]>rho_max[k]] = rho_max[k]
+                if np.sum(rho_array[k]) != 0:
+                    rho_array[k] *= netmp / np.sum(rho_array[k])
+
+            #apply non-crystallographic symmetry averaging
+            if ncs[k] != 0 and j in ncs_steps[k]:
+                rho_array[k] = align2xyz(rho_array[k])
+
+            if ncs[k] != 0 and j in [stepi+1 for stepi in ncs_steps[k]]:
+                degrees = 360./ncs[k]
+                if ncs_axis[k] == 1: axes=(1,2)
+                if ncs_axis[k] == 2: axes=(0,2)
+                if ncs_axis[k] == 3: axes=(0,1)
+                newrhosym = np.zeros_like(rho_array[k])
+                for nrot in range(0,ncs[k]+1):
+                    newrhosym += ndimage.rotate(rho_array[k],degrees*nrot,axes=axes,reshape=False)
+                rho_array[k] = newrhosym/ncs[k]
+
+            #update support using shrinkwrap method
+            if recenter[k] and j in recenter_steps[k]:
+                if recenter_mode[k] == "max":
+                    rhocom = np.unravel_index(rho_array[k].argmax(), rho_array[k].shape)
+                else:
+                    rhocom = np.array(ndimage.measurements.center_of_mass(rho_array[k]))
+                gridcenter = np.array(rho_array[k].shape)/2.
+                shift = gridcenter-rhocom
+                shift = shift.astype(int)
+                rho_array[k] = np.roll(np.roll(np.roll(rho_array[k], shift[0], axis=0), shift[1], axis=1), shift[2], axis=2)
+                support[k] = np.roll(np.roll(np.roll(support[k], shift[0], axis=0), shift[1], axis=1), shift[2], axis=2)
+
+            if shrinkwrap[k] and j >= shrinkwrap_minstep[k] and j%shrinkwrap_iter[k]==1:
+                if recenter_mode[k] == "max":
+                    rhocom = np.unravel_index(rho_array[k].argmax(), rho_array[k].shape)
+                else:
+                    rhocom = np.array(ndimage.measurements.center_of_mass(rho_array[k]))
+
+                gridcenter = np.array(rho_array[k].shape)/2.
+                shift = gridcenter-rhocom
+                shift = shift.astype(int)
+                rho_array[k] = np.roll(np.roll(np.roll(rho_array[k], shift[0], axis=0), shift[1], axis=1), shift[2], axis=2)
+
+                if j>500:
+                    tmp = np.abs(rho_array[k])
+                else:
+                    tmp = rho_array[k]
+
+                rho_blurred = ndimage.filters.gaussian_filter(tmp,sigma=sigma,mode='wrap')
+                support[k] = np.zeros(rho_array[k].shape,dtype=bool)
+                support[k][rho_blurred >= shrinkwrap_threshold_fraction*rho_blurred.max()] = True
+
+                if sigma > shrinkwrap_sigma_end and (k+1) == len(scattering_data):
+                    sigma = shrinkwrap_sigma_decay*sigma
+
+            if enforce_connectivity[k] and j in enforce_connectivity_steps[k]:
+                if recenter_mode[k] == "max":
+                    rhocom = np.unravel_index(rho_array[k].argmax(), rho_array[k].shape)
+                else:
+                    rhocom = np.array(ndimage.measurements.center_of_mass(rho_array[k]))
+
+                gridcenter = np.array(rho_array[k].shape)/2.
+                shift = gridcenter-rhocom
+                shift = shift.astype(int)
+                rho_array[k] = np.roll(np.roll(np.roll(rho_array[k], shift[0], axis=0), shift[1], axis=1), shift[2], axis=2)
+
+                #first run shrinkwrap to define the features
+                tmp = np.abs(rho_array[k])
+                rho_blurred = ndimage.filters.gaussian_filter(tmp,sigma=sigma,mode='wrap')
+                support[k] = np.zeros(rho_array[k].shape,dtype=bool)
+                support[k][rho_blurred >= shrinkwrap_threshold_fraction*rho_blurred.max()] = True
+
+                #label the support into separate segments based on a 3x3x3 grid
+                struct = ndimage.generate_binary_structure(3, 3)
+                labeled_support, num_features = ndimage.label(support[k], structure=struct)
+                sums = np.zeros((num_features))
+                if not quiet:
+                    if not gui:
+                        print(num_features)
+
+                #find the feature with the greatest number of electrons
+                for feature in range(num_features+1):
+                    sums[feature-1] = np.sum(rho_array[k][labeled_support==feature])
+                big_feature = np.argmax(sums)+1
+
+                #remove features from the support that are not the primary feature
+                support[k][labeled_support != big_feature] = False
+                rho_array[k][~support[k]] = 0
+
+                #reset the support to be the entire grid again
+                support[k] = np.ones(rho_array[k].shape,dtype=bool)
+
+            if limit_dmax[k] and j in limit_dmax_steps[k]:
+                #support[r>0.6*D] = False
+                #if np.sum(support) <= 0:
+                #    support = np.ones(rho.shape,dtype=bool)
+                #gradually (smooth like a gaussian maybe) decrease density from center
+                #set width of gradual decrease window to be +20 percent of dmax
+                #the equation of that line works out to be (where rho goes from 1 down to 0):
+                #rho = -1/(0.2*D)*r + 6
+                rho_array[k][(r>D)&(r<1.2*D)] *= (-1.0/(0.2*D)*r[(r>D)&(r<1.2*D)] + 6)
+                rho_array[k][r>=1.2*D] = 0
+
+            supportV[k][j] = np.sum(support[k])*dV
+
+        ## Creates an array of the standard deviation of the last 100 chi^2 values for each scattering profile ~JAS
+        ## averages them together ~JAS
+        chi_last = []
+        if j > 100:
+            for k in range(len(scattering_data)):
+                chi_last.append(np.std(chi_array[k][j-100:j]))
+                chi_break_val = chi_end_fraction * np.mean(np.array([np.median(chi_array[k][j-100:j]) for k in range(len(scattering_data))]))
+        else:
+            chi_last = [100] ## number larger than the chi_end_fraction
+            chi_break_val = 100
+        chi_last = np.array(chi_last)
+        chi_avg_all = np.mean(chi_last)
+        chi_all_array.append(chi_avg_all)
+        ## Gets average chi/rg for this current run -> simpler for the output in the logging
+        chi_avg_curr = np.mean(np.array([float(chi_array[k][j]) for k in range(len(scattering_data))]))
+        rg_avg_curr = np.mean(np.array([float(rg_array[k][j]) for k in range(len(scattering_data))]))
+
+        chi_break_cond.append(chi_break_val)
+
+        if not quiet:
+            if gui:
+                my_logger.info("% 5i % 4.2e % 3.2f       % 5i          ", j, chi_avg_curr, rg_avg_curr, supportV[0][j])
+            else:
+                sys.stdout.write("\r% 5i % 4.2e % 3.2f       % 5i          " % (j, chi_avg_curr, rg_avg_curr, supportV[0][j]))
+                sys.stdout.flush()
+
+        if j > 101 + np.max(shrinkwrap_minstep) and chi_avg_all < chi_break_val:
+            break
+
+        #rho = newrho - no longer needed
+
+    ## Have to average all of the densities together one more time for the final reconstruction - JAS
+    temp_rho_array = []
+    for k in range(len(scattering_data)):    
+        F = np.fft.fftn(rho_array[k] - bsld[k])
+        #calculate spherical average intensity from 3D Fs
+        Imean_array[k][j+1] = ndimage.mean(np.abs(F)**2, labels=qbin_labels, index=np.arange(0,qbin_labels.max()+1))
+        #chi[j+1] = np.sum(((Imean[j+1,qbin_args]-Idata)/sigqdata)**2)/qbin_args.size
+
+        #scale Fs to match data
+        factors = np.ones((len(qbins)))
+        factors[qbin_args_array[k]] = np.sqrt(Idata_array[k]/Imean_array[k][j+1,qbin_args_array[k]])
+        F *= factors[qbin_labels]
+        rho = np.fft.ifftn(F,rho.shape)
+        rho = rho.real
+        temp_rho_array.append(rho + bsld[k])
+
+    rho = np.average(temp_rho_array, axis = 0)
+    #negative images yield the same scattering, so flip the image
+    #to have more positive than negative values if necessary
+    #to make sure averaging is done properly
+    #whether theres actually more positive than negative values
+    #is ambiguous, but this ensures all maps are at least likely
+    #the same designation when averaging
+    if np.sum(np.abs(rho[rho<0])) > np.sum(rho[rho>0]):
+        rho *= -1
+
+    #scale total number of electrons
+    if ne is not None:
+        rho *= ne / np.sum(rho)
+    for k in range(len(scattering_data)):
+        rg_array[k][j+1] = rho2rg(rho=rho,r=r,support=support[k],dx=dx)
+        supportV[k][j+1] = supportV[k][j]
+
+    #change rho to be the electron density in e-/angstroms^3, rather than number of electrons,
+    #which is what the FFT assumes
+    rho /= dV
+
+    ## Combine the supports using a bitwise "OR" operator to get all of the values that are True for each individual support
+    temp_support = np.ones(rho.shape, dtype=bool)
+    for k in range(len(scattering_data)):
+        temp_support = temp_support | support[k] #bitwise OR operator to just combine all of the supports
+    support = temp_support
+
+    if cutout:
+        #here were going to cut rho out of the large real space box
+        #to the voxels that contain the particle
+        #use D to estimate particle size
+        #assume the particle is in the center of the box
+        #calculate how many voxels needed to contain particle of size D
+        #use bigger than D to make sure we don't crop actual particle in case its larger than expected
+        #lets clip it to a maximum of 2*D to be safe
+        nD = int(2*D/dx)+1
+        #make sure final box will still have even samples
+        if nD%2==1:
+            nD += 1
+
+        nmin = nbox/2 - nD/2
+        nmax = nbox/2 + nD/2 + 2
+        #create new rho array containing only the particle
+        newrho = rho[nmin:nmax,nmin:nmax,nmin:nmax]
+        rho = newrho
+        #do the same for the support
+        newsupport = support[nmin:nmax,nmin:nmax,nmin:nmax]
+        support = newsupport
+        #update side to new size of box
+        side = dx * (nmax-nmin)
+
+    if write_xplor_format:
+        write_xplor(rho,side,fprefix+".xplor")
+        write_xplor(np.ones_like(rho)*support, side, fprefix+"_support.xplor")
+
+    write_mrc(rho,side,fprefix+".mrc")
+    write_mrc(np.ones_like(rho)*support,side, fprefix+"_support.mrc")
+
+    #Write some more output files
+    for k in range(len(scattering_data)):
+        fit = np.zeros((len(qbinsc),5 ))
+        fit[:len(qdata_array[k]),0] = qdata_array[k]
+        fit[:len(Idata_array[k]),1] = Idata_array[k]
+        fit[:len(sigq_data_array[k]),2] = sigq_data_array[k]
+        fit[:len(qbinsc),3] = qbinsc
+        fit[:len(Imean_array[k][j+1]),4] = Imean_array[k][j+1]
+        np.savetxt(fprefix + "_" + str(k) + "_" +'_map.fit', fit, delimiter=' ', fmt='%.5e',
+            header='q(data),I(data),error(data),q(density),I(density)')
+
+        np.savetxt(fprefix+ "_" + str(k) + "_" +'_stats_by_step.dat',np.vstack((chi_array[k], rg_array[k], supportV[k])).T,
+            delimiter=" ", fmt="%.5e", header='Chi2 Rg SupportVolume')
+
+    my_logger.info('FINISHED DENSITY REFINEMENT')
+    my_logger.info('Number of steps: %i', j)
+    my_logger.info('Final Average Chi2: %.3e', chi_avg_curr)    # Modified to be the average chi2
+    my_logger.info('Final Average Rg: %3.3f', rg_avg_curr)      # Modified to be the average rg
+    my_logger.info('Final Support Volume: %3.3f', supportV[0][j+1])
+    # my_logger.info('END')
+
+    #return original unscaled values of Idata (and therefore Imean) for comparison with real data
+    for k in range(len(scattering_data)):
+        Idata_array[k] /= scale_factor_array[k]
+        sigq_data_array[k] /= scale_factor_array[k]
+        Imean_array[k] /= scale_factor_array[k]
+        scattering_data[k][0] /= scale_factor_array[k] #I
+        scattering_data[k][2] /= scale_factor_array[k] #sigq
+
+    return qdata_array, Idata_array, sigq_data_array, qbinsc, Imean_array[:,j], chi_array, rg_array, supportV, rho, side, chi_all_array, chi_break_cond
+    
 def center_rho_roll(rho):
     """Move electron density map so its center of mass aligns with the center of the grid"""
     rhocom = np.array(ndimage.measurements.center_of_mass(rho))
